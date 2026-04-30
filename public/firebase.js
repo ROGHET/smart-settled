@@ -94,16 +94,12 @@ async function loginWithGoogle(rememberMe = true) {
 
 // Handle redirect result on app load
 function handleGoogleRedirect() {
-    auth.getRedirectResult()
-        .then((result) => {
-            if (result && result.user) {
-                console.log("Google Redirect Login Success");
-
-                // 🔥 CRITICAL FIX: Force UI sync after redirect
-                window.location.reload();
-            }
-        })
-        .catch((error) => {
-            console.error("Redirect Error:", error.message);
-        });
+    auth.getRedirectResult().then((result) => {
+        if (result && result.user) {
+            console.log("Redirect success");
+            // DO NOTHING — let onAuthStateChanged handle UI
+        }
+    }).catch((error) => {
+        console.error("Redirect Error:", error.message);
+    });
 }

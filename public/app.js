@@ -2,12 +2,8 @@
 
 // Run immediately after Firebase loads
 window.addEventListener("load", () => {
-    try {
-        if (window.handleGoogleRedirect) {
-            window.handleGoogleRedirect();
-        }
-    } catch (e) {
-        console.warn("Redirect error:", e);
+    if (window.handleGoogleRedirect) {
+        window.handleGoogleRedirect();
     }
 });
 
@@ -24,18 +20,32 @@ let isGoogleSigningIn = false;
 
 // --- Auth State ---
 auth.onAuthStateChanged(user => {
+    console.log("Auth state changed:", user);
+
     if (user) {
+        console.log("User logged in:", user.email);
+
         currentUser = user;
         isGuestMode = false;
+
+        // 🔥 FORCE UI SWITCH
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-container').style.display = 'flex';
         document.getElementById('guest-banner').style.display = 'none';
+
         lucide.createIcons();
         updateUserDisplay();
-        loadGrps(); // Always load groups on auth
+
+        // load user data
+        if (typeof loadGrps === "function") {
+            loadGrps();
+        }
     } else {
+        console.log("No user logged in");
         currentUser = null;
+
         if (!isGuestMode) {
+            // show login
             document.getElementById('auth-screen').style.display = 'flex';
             document.getElementById('app-container').style.display = 'none';
             document.getElementById('guest-banner').style.display = 'none';
