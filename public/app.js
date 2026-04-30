@@ -7,6 +7,9 @@ let isGuestMode = false;
 let guestIdCounter = 1;
 let guestData = { groups: [], members: {}, expenses: {}, settlements: {} };
 
+// --- Google Auth Lock ---
+let isGoogleSigningIn = false;
+
 // --- Auth State ---
 auth.onAuthStateChanged(user => {
     if (user) {
@@ -16,6 +19,7 @@ auth.onAuthStateChanged(user => {
         document.getElementById('app-container').style.display = 'flex';
         document.getElementById('guest-banner').style.display = 'none';
         lucide.createIcons();
+        updateUserDisplay();
         loadGrps();
     } else {
         currentUser = null;
@@ -24,6 +28,7 @@ auth.onAuthStateChanged(user => {
             document.getElementById('app-container').style.display = 'none';
             document.getElementById('guest-banner').style.display = 'none';
         }
+        updateUserDisplay();
     }
 });
 
@@ -34,6 +39,7 @@ async function handleLogout() {
         document.getElementById('auth-screen').style.display = 'flex';
         document.getElementById('app-container').style.display = 'none';
         document.getElementById('guest-banner').style.display = 'none';
+        updateUserDisplay();
         notify("Guest session ended", "success");
     } else {
         await logoutUser();
@@ -83,7 +89,7 @@ async function handleForgotPassword() {
     try {
         await sendResetEmail(email);
         document.getElementById('auth-error').style.display = 'none';
-        notify('Reset link sent to ' + email, 'success');
+        notify(`Reset link sent to ${email}. Please check your inbox and spam folder.`, 'success');
     } catch (e) {
         showAuthError(e.message.replace('Firebase: ', ''));
     }
@@ -91,13 +97,17 @@ async function handleForgotPassword() {
 
 // --- Google Sign-In ---
 async function handleGoogleLogin() {
+    if (isGoogleSigningIn) return;
     const rememberMe = document.getElementById('remember-me').checked;
     document.getElementById('auth-error').style.display = 'none';
+    isGoogleSigningIn = true;
     try {
         await loginWithGoogle(rememberMe);
     } catch (e) {
-        if (e.code === 'auth/popup-closed-by-user') return;
+        if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
         showAuthError(e.message.replace('Firebase: ', ''));
+    } finally {
+        isGoogleSigningIn = false;
     }
 }
 
@@ -113,6 +123,7 @@ function enterGuestMode() {
     document.getElementById('group-title').innerText = 'My Group';
     people = []; expensesList = []; settlementsList = [];
     lucide.createIcons();
+    updateUserDisplay();
     renderGuestGroupList();
     clearUI();
 }
@@ -123,6 +134,28 @@ function renderGuestGroupList() {
         const safe = g.name.replace(/'/g, "\\'");
         return `<div class="list-item" onclick="selGrp('${g.id}', '${safe}')" style="cursor:pointer;">${g.name}</div>`;
     }).join("");
+}
+
+// --- User Display & UI ---
+function updateUserDisplay() {
+    const el = document.getElementById('user-display');
+    if (!el) return;
+    if (isGuestMode) {
+        el.innerHTML = `<div class="avatar-circle">G</div><span>Guest Mode</span>`;
+    } else if (currentUser) {
+        const name = currentUser.displayName || currentUser.email.split('@')[0];
+        const initial = name.charAt(0).toUpperCase();
+        el.innerHTML = `<div class="avatar-circle">${initial}</div><span>${name}</span>`;
+    } else {
+        el.innerHTML = '';
+    }
+}
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('main-sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('open');
 }
 
 // --- Desktop Glow Effect (Login Page) ---
