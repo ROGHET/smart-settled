@@ -8,7 +8,7 @@
 // 2. http://localhost:*
 const firebaseConfig = {
   apiKey: "AIzaSyDO5JvmQM8MoyOwxhwBXfG2-9_NkDlcwJU",
-  authDomain: "smart-settled.vercel.app",
+  authDomain: "smart-settled.firebaseapp.com",
   projectId: "smart-settled",
   storageBucket: "smart-settled.firebasestorage.app",
   messagingSenderId: "570832509663",

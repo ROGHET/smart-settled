@@ -1,4 +1,16 @@
 // SmartSettled — App Logic (Firebase Firestore + Auth)
+
+// Run immediately after Firebase loads
+window.addEventListener("load", () => {
+    try {
+        if (window.handleGoogleRedirect) {
+            window.handleGoogleRedirect();
+        }
+    } catch (e) {
+        console.warn("Redirect error:", e);
+    }
+});
+
 let currentUser = null, curGrp = null, people = [], settlementsList = [], expensesList = [];
 let pChart = null, bChart = null, sim = null;
 
@@ -153,9 +165,6 @@ function toggleSidebar() {
 
 // --- Desktop Glow Effect (Login Page) ---
 document.addEventListener('DOMContentLoaded', function() {
-    // [ISSUE 1] Handle redirect result if user was redirected back from Google
-    if (typeof handleGoogleRedirect === 'function') handleGoogleRedirect();
-
     const authScreen = document.getElementById('auth-screen');
     if (authScreen) {
         authScreen.addEventListener('mousemove', function(e) {
@@ -172,12 +181,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (logo) logo.onclick = () => window.location.reload();
 
     // [ISSUE 5] Mobile Navigation Fix (Call)
-    setupMobileNavigation();
-
-    document.querySelectorAll(".section").forEach(sec => {
-        sec.style.display = "none";
-    });
-    document.getElementById("dashboard").style.display = "block";
+    if (!window.navInitialized) {
+        setupMobileNavigation();
+        window.navInitialized = true;
+    }
 
     lucide.createIcons();
 });
@@ -187,23 +194,12 @@ function setupMobileNavigation() {
 
   navItems.forEach(item => {
     item.addEventListener("click", function () {
-      const sectionId = this.getAttribute("onclick")
-        ?.match(/'([^']+)'/)?.[1];
+      const sectionId = this.dataset.section;
 
       if (!sectionId) return;
 
-      // remove active from nav
-      navItems.forEach(i => i.classList.remove("active"));
-      this.classList.add("active");
-
-      // hide all sections
-      document.querySelectorAll(".section").forEach(sec => {
-        sec.style.display = "none";
-      });
-
-      // show only target
-      const target = document.getElementById(sectionId);
-      if (target) target.style.display = "block";
+      // USE EXISTING SYSTEM
+      switchSection(sectionId, this);
 
       // close sidebar (mobile)
       if (window.innerWidth <= 768) {
