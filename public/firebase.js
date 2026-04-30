@@ -2,10 +2,12 @@
 // SmartSettled — Firebase Configuration & Auth (Fixed)
 // ============================================================
 
-// [ISSUE 4] GITHUB SECRET LEAK FIX: Key rotated & Restricted in Google Cloud Console
-// Allowed Domains: smart-settled.vercel.app, localhost
+// [FIX] Restored valid API key to resolve "auth/api-key-not-valid" error
+// IMPORTANT: Restrict this API key in Google Cloud Console for:
+// 1. https://smart-settled.vercel.app/*
+// 2. http://localhost:*
 const firebaseConfig = {
-  apiKey: "AIzaSyDO5JvmQM8MoyOwxhwBXfG2-9_NkDlcwJU_ROTATED", // Replace with your actual new rotated key
+  apiKey: "AIzaSyDO5JvmQM8MoyOwxhwBXfG2-9_NkDlcwJU",
   authDomain: "smart-settled.firebaseapp.com",
   projectId: "smart-settled",
   storageBucket: "smart-settled.firebasestorage.app",
