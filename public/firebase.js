@@ -83,23 +83,44 @@ async function loginWithGoogle(rememberMe = true) {
         ? firebase.auth.Auth.Persistence.LOCAL
         : firebase.auth.Auth.Persistence.SESSION;
     
-    try {
-        await auth.setPersistence(persistence);
-        // [ISSUE 1] Using redirect as primary
-        await auth.signInWithRedirect(googleProvider);
-    } catch (err) {
-        throw err;
-    }
+    const provider = new firebase.auth.GoogleAuthProvider();
+
+    await auth.setPersistence(persistence);
+
+    // 🔥 MUST use redirect
+    await auth.signInWithRedirect(provider);
 }
 
 // Handle redirect result on app load
-function handleGoogleRedirect() {
-    auth.getRedirectResult().then((result) => {
+async function handleGoogleRedirect() {
+    try {
+        const result = await auth.getRedirectResult();
+
         if (result && result.user) {
-            console.log("Redirect success");
-            // DO NOTHING — let onAuthStateChanged handle UI
+            console.log("Redirect login success:", result.user.email);
+
+            // 🔥 IMPORTANT: delay to allow auth state propagation
+            setTimeout(() => {
+                const user = auth.currentUser;
+
+                if (user) {
+                    console.log("User detected after redirect:", user.email);
+
+                    document.getElementById('auth-screen').style.display = 'none';
+                    document.getElementById('app-container').style.display = 'flex';
+                    
+                    const guestBanner = document.getElementById('guest-banner');
+                    if (guestBanner) guestBanner.style.display = 'none';
+
+                    if (typeof window.lucide !== 'undefined') window.lucide.createIcons();
+                    if (typeof window.updateUserDisplay === "function") window.updateUserDisplay();
+
+                    if (typeof loadGrps === "function") loadGrps();
+                }
+            }, 300);
         }
-    }).catch((error) => {
-        console.error("Redirect Error:", error.message);
-    });
+
+    } catch (error) {
+        console.error("Redirect error:", error.message);
+    }
 }

@@ -1,21 +1,10 @@
 // SmartSettled — App Logic (Firebase Firestore + Auth)
 
 // Run immediately after Firebase loads
-window.addEventListener("load", () => {
+window.addEventListener("DOMContentLoaded", () => {
     if (window.handleGoogleRedirect) {
         window.handleGoogleRedirect();
     }
-
-    setTimeout(() => {
-        if (auth.currentUser) {
-            console.log("Fallback auth detected");
-
-            document.getElementById('auth-screen').style.display = 'none';
-            document.getElementById('app-container').style.display = 'flex';
-
-            loadGrps?.();
-        }
-    }, 1000);
 });
 
 let currentUser = null, curGrp = null, people = [], settlementsList = [], expensesList = [];
@@ -37,12 +26,9 @@ auth.onAuthStateChanged(user => {
     const appContainer = document.getElementById('app-container');
 
     if (user) {
-        console.log("User logged in:", user.email);
-
         currentUser = user;
         isGuestMode = false;
 
-        // 🔥 FORCE UI SWITCH
         if (authScreen) authScreen.style.display = 'none';
         if (appContainer) appContainer.style.display = 'flex';
         
@@ -52,20 +38,23 @@ auth.onAuthStateChanged(user => {
         lucide.createIcons();
         updateUserDisplay();
 
-        // ensure data loads
-        loadGrps?.();
+        if (typeof loadGrps === "function") loadGrps();
 
     } else {
-        console.log("No user logged in");
         currentUser = null;
 
-        if (!isGuestMode) {
-            if (authScreen) authScreen.style.display = 'flex';
-            if (appContainer) appContainer.style.display = 'none';
-            const guestBanner = document.getElementById('guest-banner');
-            if (guestBanner) guestBanner.style.display = 'none';
-        }
-        updateUserDisplay();
+        // ⚠️ prevent flicker during redirect
+        setTimeout(() => {
+            if (!auth.currentUser) {
+                if (!isGuestMode) {
+                    if (authScreen) authScreen.style.display = 'flex';
+                    if (appContainer) appContainer.style.display = 'none';
+                    const guestBanner = document.getElementById('guest-banner');
+                    if (guestBanner) guestBanner.style.display = 'none';
+                }
+                updateUserDisplay();
+            }
+        }, 500);
     }
 });
 
