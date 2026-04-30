@@ -191,12 +191,24 @@
             .header h1 { font-size:1.2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px; }
             .user-display { font-size:0.8rem; }
             .avatar-circle { width:28px; height:28px; font-size:0.75rem; }
+
+            /* [ISSUE 5] MOBILE DASHBOARD REORDERING */
+            #dashboard { display: flex; flex-direction: column; }
+            #dashboard .dashboard-grid { order: 2; margin-top: 1.5rem; }
+            #dashboard div[style*="grid-template-columns: 1fr 1fr"] { order: 1; }
+            
+            /* [ISSUE 6] ANALYTICS VERTICAL STACKING */
+            #analytics div[style*="display:grid"] { grid-template-columns: 1fr !important; }
+            
+            /* [ISSUE 7] REPORT UI POLISHING */
+            .report-controls { flex-direction: column !important; gap: 0.75rem !important; }
+            .report-controls button, .report-controls select { width: 100% !important; height: 40px; }
         }
         @media (max-width:480px) {
-            .dashboard-grid { grid-template-columns:1fr; }
+            .dashboard-grid { grid-template-columns: 1fr; }
             .stat-card .value { font-size:1.2rem; }
             .header h1 { max-width:100px; }
-            .user-display span { display:none; } /* Hide email text on very small screens, keep avatar */
+            .user-display span { display:none; }
         }
     </style>
 </head>
@@ -363,10 +375,10 @@
             <div id="reports" class="section">
                 <div class="card">
                     <div class="card-header">Generation Center</div>
-                    <div style="display:flex; gap:1rem">
-                        <button class="btn btn-primary" onclick="expAll()" style="flex:1">Global PDF (Includes Graph)</button>
-                        <select id="user-pdf-sel" style="flex:1; margin-bottom:0"></select>
-                        <button class="btn btn-primary" onclick="expUser()">User PDF</button>
+                    <div class="report-controls" style="display:flex; gap:1rem; align-items:center;">
+                        <button class="btn btn-primary" onclick="expAll()" style="flex:1.5; justify-content:center; white-space:nowrap;">Global PDF (Full)</button>
+                        <select id="user-pdf-sel" style="flex:1; margin-bottom:0; height:38px; border-color:var(--primary-light);"></select>
+                        <button class="btn btn-primary" onclick="expUser()" style="flex:1; justify-content:center;">User PDF</button>
                     </div>
                 </div>
             </div>

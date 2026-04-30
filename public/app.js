@@ -104,6 +104,7 @@ async function handleGoogleLogin() {
     try {
         await loginWithGoogle(rememberMe);
     } catch (e) {
+        // [ISSUE 1] Ignore specific popup/redirect errors that aren't critical
         if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
         showAuthError(e.message.replace('Firebase: ', ''));
     } finally {
@@ -160,6 +161,9 @@ function toggleSidebar() {
 
 // --- Desktop Glow Effect (Login Page) ---
 document.addEventListener('DOMContentLoaded', function() {
+    // [ISSUE 1] Handle redirect result if user was redirected back from Google
+    if (typeof handleGoogleRedirect === 'function') handleGoogleRedirect();
+
     const authScreen = document.getElementById('auth-screen');
     if (authScreen) {
         authScreen.addEventListener('mousemove', function(e) {
