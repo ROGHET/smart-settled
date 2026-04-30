@@ -100,8 +100,13 @@ function changeUsername() {
             updateUserDisplay?.();
         });
     } else {
-        // ❌ REMOVE for guest
-        alert("Username change not available in Guest Mode");
+        // ✅ ALLOW guest username
+        localStorage.setItem("guestUsername", newName);
+
+        alert("Username updated (Guest)");
+
+        // update UI instantly
+        updateUserDisplay?.();
     }
 }
 
