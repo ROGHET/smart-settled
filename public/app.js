@@ -461,8 +461,17 @@ async function loadPpl() {
         snap.forEach(doc => people.push(doc.data().name));
     }
     document.getElementById('people-list').innerHTML = people.length ?
-        people.map(p => `<div class="list-item"><span>${p}</span></div>`).join("") :
+        people.map(p => {
+            const safeName = p.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+            return `<div class="list-item member-item">
+                <span class="member-name">${p}</span>
+                <button class="edit-member-btn" title="Edit name" onclick="editMemberName('${safeName}')">
+                    <i data-lucide="pencil" style="width:16px;height:16px;color:var(--text-main);"></i>
+                </button>
+            </div>`;
+        }).join("") :
         '<p style="color:var(--text-dim); font-size:0.85rem; padding:10px; text-align:center;">No members yet.</p>';
+    if (window.lucide) lucide.createIcons();
     ['ex-payer', 'user-pdf-sel'].forEach(id => {
         document.getElementById(id).innerHTML = people.map(p => `<option value="${p}">${p}</option>`).join("");
     });
@@ -481,6 +490,80 @@ async function addMem() {
     el.value = "";
     await refresh();
 }
+
+async function editMemberName(oldName) {
+    const newName = prompt("Edit member name:", oldName);
+    if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
+    
+    const finalName = newName.trim();
+    if (people.includes(finalName)) {
+        alert("Member name already exists!");
+        return;
+    }
+    
+    if (isGuestMode) {
+        const idx = guestData.members[curGrp].indexOf(oldName);
+        if (idx !== -1) guestData.members[curGrp][idx] = finalName;
+        
+        guestData.expenses[curGrp]?.forEach(ex => {
+            if (ex.payer === oldName) ex.payer = finalName;
+            const pIdx = ex.participants.indexOf(oldName);
+            if (pIdx !== -1) ex.participants[pIdx] = finalName;
+        });
+        
+        guestData.settlements[curGrp]?.forEach(s => {
+            if (s.payer === oldName) s.payer = finalName;
+            if (s.receiver === oldName) s.receiver = finalName;
+        });
+    } else {
+        const batch = db.batch();
+        const uid = currentUser.uid;
+        
+        // 1. Members
+        const memSnap = await db.collection('members').where('userId','==',uid).where('groupId','==',curGrp).where('name','==',oldName).get();
+        memSnap.forEach(doc => batch.update(doc.ref, { name: finalName }));
+        
+        // 2. Expenses
+        const exSnap = await db.collection('expenses').where('userId','==',uid).where('groupId','==',curGrp).get();
+        exSnap.forEach(doc => {
+            const data = doc.data();
+            let changed = false;
+            const updateData = {};
+            if (data.payer === oldName) { updateData.payer = finalName; changed = true; }
+            if (data.participants && data.participants.includes(oldName)) {
+                updateData.participants = data.participants.map(p => p === oldName ? finalName : p);
+                changed = true;
+            }
+            if (changed) batch.update(doc.ref, updateData);
+        });
+        
+        // 3. Settlements
+        const setSnap = await db.collection('settlements').where('userId','==',uid).where('groupId','==',curGrp).get();
+        setSnap.forEach(doc => {
+            const data = doc.data();
+            let changed = false;
+            const updateData = {};
+            if (data.payer === oldName) { updateData.payer = finalName; changed = true; }
+            if (data.receiver === oldName) { updateData.receiver = finalName; changed = true; }
+            if (changed) batch.update(doc.ref, updateData);
+        });
+        
+        await batch.commit();
+    }
+    await refresh();
+}
+
+function addMemberPrompt() {
+    const name = prompt("Enter member name:");
+    if (!name) return;
+    document.getElementById('member-search').value = name;
+    addMem();
+}
+
+function collapseGroup() {
+    document.getElementById('grp-modal').style.display = 'none';
+}
+
 
 // --- Expenses ---
 async function loadEx() {

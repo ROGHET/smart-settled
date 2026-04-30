@@ -233,10 +233,21 @@
         #sidebar-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); backdrop-filter:blur(4px); z-index:90; pointer-events:auto; }
         #sidebar-overlay:not(.open) { display: none; }
 
+        /* --- New UI Additions --- */
+        .member-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .edit-member-btn { background: transparent; border: none; cursor: pointer; opacity: 0.6; transition: 0.2s ease; display: flex; align-items: center; justify-content: center; padding: 4px; }
+        .edit-member-btn:hover { opacity: 1; transform: scale(1.1); }
+        .mobile-add-btn { display: none; width: 100%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 600; margin-bottom: 1rem; cursor: pointer; font-family: 'Outfit', sans-serif; transition: 0.2s; }
+        .mobile-add-btn:hover { opacity: 0.9; }
+        .group-close-btn { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.1); color: white; border: none; border-radius: 8px; padding: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; }
+        .group-close-btn:hover { background: rgba(255,255,255,0.2); }
+
         @media (max-width:768px) {
             #auth-glow { display:none; }
             #menu-toggle { display:block; }
             body { flex-direction:column; overflow:auto; }
+            #app-container { justify-content: center; align-items: center; padding: 10px; }
+            .mobile-add-btn { display: block; }
             .sidebar { 
                 position:fixed; top:0; left:0; width:280px; height:100vh; 
                 transform:translateX(-100%); transition:transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
@@ -250,7 +261,7 @@
             .sidebar .signature { display:block; margin-top:auto; }
             .sidebar .dm-tag { display:block; margin-bottom:2rem; }
             
-            .main { padding:1rem; height:auto; overflow:visible; }
+            .main { padding:1rem; height:auto; overflow:visible; max-width: 100%; margin: auto; }
             .dashboard-grid { grid-template-columns:repeat(2,1fr); }
             .auth-card { margin:1rem; max-width:95%; }
             #graph-container { height:300px; }
@@ -385,6 +396,7 @@
                         <div class="search-box">
                             <input type="text" id="member-search" placeholder="Add member name..." onkeypress="if(event.key==='Enter') addMem()">
                         </div>
+                        <button class="mobile-add-btn" onclick="addMemberPrompt()">+ Add Member</button>
                         <div id="people-list"></div>
                     </div>
                 </div>
@@ -465,7 +477,8 @@
         </div>
 
         <!-- Group Modal -->
-        <div id="grp-modal" style="display:none; position:fixed; top:80px; right:40px; background:var(--sidebar-bg); backdrop-filter:blur(20px); border:1px solid var(--glass-border); padding:1rem; border-radius:12px; min-width:200px; z-index:200;">
+        <div id="grp-modal" style="display:none; position:fixed; top:80px; right:40px; background:var(--sidebar-bg); backdrop-filter:blur(20px); border:1px solid var(--glass-border); padding:2.5rem 1rem 1rem 1rem; border-radius:12px; min-width:200px; z-index:200;">
+            <button class="group-close-btn" onclick="collapseGroup()">✕</button>
             <div id="grp-list"></div>
             <input type="text" id="new-grp-name" placeholder="New group..." style="margin:10px 0">
             <button class="btn btn-primary btn-sm" onclick="addGrp()" style="width:100%">Create</button>
