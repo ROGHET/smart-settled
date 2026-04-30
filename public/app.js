@@ -5,6 +5,17 @@ window.addEventListener("load", () => {
     if (window.handleGoogleRedirect) {
         window.handleGoogleRedirect();
     }
+
+    setTimeout(() => {
+        if (auth.currentUser) {
+            console.log("Fallback auth detected");
+
+            document.getElementById('auth-screen').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+
+            loadGrps?.();
+        }
+    }, 1000);
 });
 
 let currentUser = null, curGrp = null, people = [], settlementsList = [], expensesList = [];
@@ -22,6 +33,9 @@ let isGoogleSigningIn = false;
 auth.onAuthStateChanged(user => {
     console.log("Auth state changed:", user);
 
+    const authScreen = document.getElementById('auth-screen');
+    const appContainer = document.getElementById('app-container');
+
     if (user) {
         console.log("User logged in:", user.email);
 
@@ -29,26 +43,27 @@ auth.onAuthStateChanged(user => {
         isGuestMode = false;
 
         // 🔥 FORCE UI SWITCH
-        document.getElementById('auth-screen').style.display = 'none';
-        document.getElementById('app-container').style.display = 'flex';
-        document.getElementById('guest-banner').style.display = 'none';
+        if (authScreen) authScreen.style.display = 'none';
+        if (appContainer) appContainer.style.display = 'flex';
+        
+        const guestBanner = document.getElementById('guest-banner');
+        if (guestBanner) guestBanner.style.display = 'none';
 
         lucide.createIcons();
         updateUserDisplay();
 
-        // load user data
-        if (typeof loadGrps === "function") {
-            loadGrps();
-        }
+        // ensure data loads
+        loadGrps?.();
+
     } else {
         console.log("No user logged in");
         currentUser = null;
 
         if (!isGuestMode) {
-            // show login
-            document.getElementById('auth-screen').style.display = 'flex';
-            document.getElementById('app-container').style.display = 'none';
-            document.getElementById('guest-banner').style.display = 'none';
+            if (authScreen) authScreen.style.display = 'flex';
+            if (appContainer) appContainer.style.display = 'none';
+            const guestBanner = document.getElementById('guest-banner');
+            if (guestBanner) guestBanner.style.display = 'none';
         }
         updateUserDisplay();
     }
@@ -80,13 +95,13 @@ function changeUsername() {
             displayName: newName
         }).then(() => {
             alert("Username updated");
-            window.location.reload();
+
+            // 🔥 UPDATE UI WITHOUT RELOAD
+            updateUserDisplay?.();
         });
     } else {
-        // guest mode
-        localStorage.setItem("guestUsername", newName);
-        alert("Username updated (Guest)");
-        window.location.reload();
+        // ❌ REMOVE for guest
+        alert("Username change not available in Guest Mode");
     }
 }
 

@@ -13,6 +13,18 @@
 </head>
 <body>
     <div class="container">
+        <button onclick="goHome()" style="
+          background:#6366f1;
+          color:white;
+          border:none;
+          padding:10px 18px;
+          border-radius:8px;
+          cursor:pointer;
+          margin-bottom:20px;
+          transition:0.2s;
+        " onmouseover="this.style.opacity=0.85" onmouseout="this.style.opacity=1">
+        ← Back to SmartSettled
+        </button>
         <h1>Terms of Service</h1>
         <p><strong>Effective Date:</strong> April 30, 2026</p>
         <h2>1. Acceptance of Terms</h2>
@@ -23,7 +35,11 @@
         <p>You are responsible for maintaining the confidentiality of your account and for all activities that occur under your account.</p>
         <h2>4. Disclaimer</h2>
         <p>The service is provided "as is". We make no warranties, expressed or implied, and hereby disclaim all other warranties.</p>
-        <p><a href="/">Return to Home</a></p>
     </div>
+    <script>
+    function goHome() {
+      window.location.href = "/";
+    }
+    </script>
 </body>
 </html>

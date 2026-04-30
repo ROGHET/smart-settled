@@ -13,6 +13,18 @@
 </head>
 <body>
     <div class="container">
+        <button onclick="goHome()" style="
+          background:#6366f1;
+          color:white;
+          border:none;
+          padding:10px 18px;
+          border-radius:8px;
+          cursor:pointer;
+          margin-bottom:20px;
+          transition:0.2s;
+        " onmouseover="this.style.opacity=0.85" onmouseout="this.style.opacity=1">
+        ← Back to SmartSettled
+        </button>
         <h1>Privacy Policy</h1>
         <p><strong>Effective Date:</strong> April 30, 2026</p>
         <h2>1. Information We Collect</h2>
@@ -23,7 +35,11 @@
         <p>We do not sell, rent, or share your personal information with third parties except as necessary to provide the service (e.g., Firebase Authentication/Firestore).</p>
         <h2>4. Contact</h2>
         <p>If you have any questions about this Privacy Policy, please contact us.</p>
-        <p><a href="/">Return to Home</a></p>
     </div>
+    <script>
+    function goHome() {
+      window.location.href = "/";
+    }
+    </script>
 </body>
 </html>
