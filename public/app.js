@@ -2,6 +2,17 @@
 
 let redirectHandled = false;
 
+// Run immediately after Firebase loads
+window.addEventListener("load", async () => {
+    if (window.handleGoogleRedirect) {
+        await window.handleGoogleRedirect();
+    }
+    redirectHandled = true;
+    
+    // Manually trigger state evaluation now that redirect is resolved
+    handleAuthState(auth.currentUser);
+});
+
 let currentUser = null, curGrp = null, people = [], settlementsList = [], expensesList = [];
 let pChart = null, bChart = null, sim = null;
 
@@ -49,6 +60,9 @@ function handleAuthState(user) {
 
 // --- Auth State ---
 auth.onAuthStateChanged(user => {
+    // 🚫 IGNORE early trigger before redirect completes
+    if (!redirectHandled) return;
+
     handleAuthState(user);
 });
 

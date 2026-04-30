@@ -93,3 +93,20 @@ async function loginWithGoogle(rememberMe = true) {
     // 🔥 MUST use redirect
     await auth.signInWithRedirect(provider);
 }
+
+// Handle redirect result on app load
+async function handleGoogleRedirect() {
+    try {
+        const result = await auth.getRedirectResult();
+
+        if (result && result.user) {
+            console.log("✅ Redirect success:", result.user.email);
+        } else {
+            console.log("⚠️ No redirect result (normal on first load)");
+        }
+    } catch (error) {
+        console.error("❌ Redirect error:", error.message);
+    }
+}
+
+window.handleGoogleRedirect = handleGoogleRedirect;
