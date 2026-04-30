@@ -8,7 +8,7 @@
 // 2. http://localhost:*
 const firebaseConfig = {
   apiKey: "AIzaSyDO5JvmQM8MoyOwxhwBXfG2-9_NkDlcwJU",
-  authDomain: "smart-settled.firebaseapp.com",
+  authDomain: "smart-settled.vercel.app",
   projectId: "smart-settled",
   storageBucket: "smart-settled.firebasestorage.app",
   messagingSenderId: "570832509663",
@@ -108,3 +108,5 @@ async function handleGoogleRedirect() {
         console.error("❌ Redirect error:", error.message);
     }
 }
+
+window.handleGoogleRedirect = handleGoogleRedirect;
