@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartSettlement | Smart Expense Splitting Made Simple</title>
+    <meta name="google-site-verification" content="YOUR_VERIFICATION_CODE" />
+    <title>SmartSettlement | Effortless group expense splitting</title>
     <meta name="description" content="Smart expense splitting using graph optimization and minimum cash flow algorithms">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
@@ -252,7 +253,7 @@
                 <i data-lucide="network"></i>
                 <span>SmartSettled</span>
             </div>
-            <p class="auth-subtitle">Smart Expense Splitting Made Simple</p>
+            <p class="auth-subtitle">Effortless group expense splitting</p>
             <div id="auth-error"></div>
             <h2 id="auth-title" style="font-size:1.3rem; margin-bottom:1.2rem; text-align:center;">Sign In</h2>
 
@@ -273,6 +274,10 @@
             <div class="auth-credits">
                 <span>Developed by Harshit Rawat</span><br>
                 <span>With contributions from Kaushiki Choubey</span>
+                <p style="margin-top: 10px; font-size: 0.8rem;">
+                  <a href="/privacy.html" style="color:var(--primary-light); text-decoration:none;">Privacy Policy</a> |
+                  <a href="/terms.html" style="color:var(--primary-light); text-decoration:none;">Terms of Service</a>
+                </p>
             </div>
         </div>
     </div>
@@ -286,7 +291,7 @@
                 <i data-lucide="network"></i>
                 <span>SmartSettled</span>
             </div>
-            <div class="dm-tag">Smart Expense Splitting Made Simple</div>
+            <div class="dm-tag">Effortless group expense splitting</div>
             
             <div class="nav">
                 <div class="nav-item active" data-section="dashboard" onclick="switchSection('dashboard', this)"><i data-lucide="home"></i> Dashboard</div>
@@ -300,12 +305,12 @@
 
             <div class="signature">
                 <span>By Harshit Rawat</span>
-                <button class="btn btn-logout btn-sm" onclick="handleLogout()"><i data-lucide="log-out" style="width:14px;height:14px"></i> Sign Out</button>
+                <button class="btn btn-logout btn-sm" onclick="logout()"><i data-lucide="log-out" style="width:14px;height:14px"></i> Sign Out</button>
             </div>
         </div>
 
         <div class="main">
-            <div id="guest-banner">⚠️ Guest Mode: Your data will not be saved after you exit.</div>
+            <div id="guest-banner"><i data-lucide="alert-triangle" style="width:16px;height:16px;vertical-align:text-bottom;margin-right:4px;"></i> Guest Mode: Your data will not be saved after you exit.</div>
             <div class="header">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <button id="menu-toggle" onclick="toggleSidebar()"><i data-lucide="menu"></i></button>

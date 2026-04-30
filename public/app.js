@@ -44,17 +44,39 @@ auth.onAuthStateChanged(user => {
     }
 });
 
-async function handleLogout() {
-    if (isGuestMode) {
-        isGuestMode = false;
-        guestData = { groups: [], members: {}, expenses: {}, settlements: {} };
-        document.getElementById('auth-screen').style.display = 'flex';
-        document.getElementById('app-container').style.display = 'none';
-        document.getElementById('guest-banner').style.display = 'none';
-        updateUserDisplay();
-        notify("Guest session ended", "success");
+function logout() {
+    const user = auth.currentUser;
+
+    if (user) {
+        auth.signOut().then(() => {
+            window.location.reload();
+        });
     } else {
-        await logoutUser();
+        // guest logout fix
+        localStorage.clear();
+        window.location.reload();
+    }
+}
+
+function changeUsername() {
+    const newName = prompt("Enter new username:");
+
+    if (!newName || !newName.trim()) return;
+
+    const user = auth.currentUser;
+
+    if (user) {
+        user.updateProfile({
+            displayName: newName
+        }).then(() => {
+            alert("Username updated");
+            window.location.reload();
+        });
+    } else {
+        // guest mode
+        localStorage.setItem("guestUsername", newName);
+        alert("Username updated (Guest)");
+        window.location.reload();
     }
 }
 
@@ -151,6 +173,9 @@ function updateUserDisplay() {
         const name = currentUser.displayName || currentUser.email.split('@')[0];
         const initial = name.charAt(0).toUpperCase();
         el.innerHTML = `<div class="avatar-circle">${initial}</div><span>${name}</span>`;
+    } else if (localStorage.getItem("guestUsername")) {
+        const guestName = localStorage.getItem("guestUsername");
+        el.innerHTML = `<div class="avatar-circle">${guestName.charAt(0).toUpperCase()}</div><span>${guestName}</span>`;
     } else {
         el.innerHTML = '';
     }
@@ -203,9 +228,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    document.getElementById("logout-btn")?.addEventListener("click", () => {
-        auth.signOut();
-    });
+    document.getElementById("change-username")?.addEventListener("click", changeUsername);
+    document.getElementById("logout-btn")?.addEventListener("click", logout);
 
     // [ISSUE 5] Mobile Navigation Fix (Call)
     if (!window.navInitialized) {
