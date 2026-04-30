@@ -180,6 +180,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const logo = document.getElementById("app-logo");
     if (logo) logo.onclick = () => window.location.reload();
 
+    const container = document.getElementById("app-container");
+    if (container) {
+        container.addEventListener("mousemove", (e) => {
+            const x = e.clientX;
+            const y = e.clientY;
+
+            container.style.background = `
+                radial-gradient(circle at ${x}px ${y}px, 
+                rgba(99,102,241,0.15), 
+                transparent 40%)
+            `;
+        });
+    }
+
+    const trigger = document.getElementById("profile-trigger");
+    const dropdown = document.getElementById("profile-dropdown");
+
+    if (trigger && dropdown) {
+        trigger.addEventListener("click", () => {
+            dropdown.classList.toggle("show");
+        });
+    }
+
+    document.getElementById("logout-btn")?.addEventListener("click", () => {
+        auth.signOut();
+    });
+
     // [ISSUE 5] Mobile Navigation Fix (Call)
     if (!window.navInitialized) {
         setupMobileNavigation();

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartSettlement | Directed Graphs & Flow Optimization</title>
+    <title>SmartSettlement | Smart Expense Splitting Made Simple</title>
     <meta name="description" content="Smart expense splitting using graph optimization and minimum cash flow algorithms">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
@@ -162,6 +162,35 @@
         /* --- Auth Glow (Desktop Only) --- */
         #auth-glow { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10000; background:radial-gradient(600px circle at var(--mouse-x,50%) var(--mouse-y,50%), rgba(99,102,241,0.06), transparent 40%); transition:background 0.15s ease; }
 
+        /* --- Profile Dropdown --- */
+        #profile-menu-wrapper { position: relative; }
+        #profile-dropdown {
+            position: absolute;
+            right: 0;
+            top: 50px;
+            background: #1e293b;
+            border-radius: 10px;
+            padding: 10px;
+            display: none;
+            z-index: 300;
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            min-width: 160px;
+        }
+        #profile-dropdown.show {
+            display: block;
+        }
+        .dropdown-item {
+            padding: 10px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: 0.2s;
+            font-size: 0.9rem;
+        }
+        .dropdown-item:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
         /* --- Mobile Responsive --- */
         #menu-toggle { display:none; background:transparent; border:none; color:var(--text-main); cursor:pointer; padding:5px; }
         #sidebar-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); backdrop-filter:blur(4px); z-index:90; pointer-events:auto; }
@@ -223,7 +252,7 @@
                 <i data-lucide="network"></i>
                 <span>SmartSettled</span>
             </div>
-            <p class="auth-subtitle">Directed Graphs & Flow Optimization</p>
+            <p class="auth-subtitle">Smart Expense Splitting Made Simple</p>
             <div id="auth-error"></div>
             <h2 id="auth-title" style="font-size:1.3rem; margin-bottom:1.2rem; text-align:center;">Sign In</h2>
 
@@ -242,8 +271,8 @@
             <p class="auth-switch" id="auth-switch">Don't have an account? <a href="#" onclick="toggleAuthMode();return false">Sign Up</a></p>
             <button class="guest-btn" onclick="enterGuestMode()">Continue as Guest</button>
             <div class="auth-credits">
-                <span>By Harshit Rawat</span><br>
-                <span>Contribution By Kaushiki Choubey</span>
+                <span>Developed by Harshit Rawat</span><br>
+                <span>With contributions from Kaushiki Choubey</span>
             </div>
         </div>
     </div>
@@ -257,7 +286,7 @@
                 <i data-lucide="network"></i>
                 <span>SmartSettled</span>
             </div>
-            <div class="dm-tag">Directed Graphs & Flow Optimization</div>
+            <div class="dm-tag">Smart Expense Splitting Made Simple</div>
             
             <div class="nav">
                 <div class="nav-item active" data-section="dashboard" onclick="switchSection('dashboard', this)"><i data-lucide="home"></i> Dashboard</div>
@@ -283,7 +312,16 @@
                     <h1 id="group-title">Loading...</h1>
                 </div>
                 <div style="display:flex; align-items:center; gap:15px;">
-                    <div id="user-display" class="user-display"></div>
+                    <div id="profile-menu-wrapper">
+                        <div id="profile-trigger">
+                            <div id="user-display" class="user-display" style="cursor: pointer;"></div>
+                        </div>
+
+                        <div id="profile-dropdown" class="hidden">
+                            <div class="dropdown-item" id="change-username">Change Username</div>
+                            <div class="dropdown-item" id="logout-btn">Sign Out</div>
+                        </div>
+                    </div>
                     <div class="btn btn-primary btn-sm" onclick="toggleGrp()" id="switch-grp-btn">Switch Group <i data-lucide="chevron-down"></i></div>
                 </div>
             </div>
