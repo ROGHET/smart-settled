@@ -685,7 +685,7 @@ function computeStatus() {
         if (s.payer in balances) balances[s.payer] += s.amount;
         if (s.receiver in balances) balances[s.receiver] -= s.amount;
     });
-    let highSpender = '-', mostOwed = '-', maxB = -Infinity, minB = Infinity;
+    let highSpender = '-', mostOwed = '-', maxB = 0.01, minB = -0.01;
     for (const [name, bal] of Object.entries(balances)) {
         if (bal > maxB) { maxB = bal; highSpender = name; }
         if (bal < minB) { minB = bal; mostOwed = name; }

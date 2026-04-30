@@ -7,7 +7,7 @@
 // 1. https://smart-settled.vercel.app/*
 // 2. http://localhost:*
 const firebaseConfig = {
-  apiKey: "AIzaSyDO5JvmQM8MoyOwxhwBXfG2-9_NkDlcwJU",
+  apiKey: "AIzaSyDkHGFzSFJzlFsW6siQ0_th5JIE5V_epoc",
   authDomain: "smart-settled.vercel.app",
   projectId: "smart-settled",
   storageBucket: "smart-settled.firebasestorage.app",
