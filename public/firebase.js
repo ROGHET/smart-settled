@@ -8,7 +8,7 @@
 // 2. http://localhost:*
 const firebaseConfig = {
   apiKey: "AIzaSyDO5JvmQM8MoyOwxhwBXfG2-9_NkDlcwJU",
-  authDomain: "smart-settled.vercel.app",
+  authDomain: "smart-settled.firebaseapp.com",
   projectId: "smart-settled",
   storageBucket: "smart-settled.firebasestorage.app",
   messagingSenderId: "570832509663",
@@ -93,20 +93,3 @@ async function loginWithGoogle(rememberMe = true) {
     // 🔥 MUST use redirect
     await auth.signInWithRedirect(provider);
 }
-
-// Handle redirect result on app load
-async function handleGoogleRedirect() {
-    try {
-        const result = await auth.getRedirectResult();
-
-        if (result && result.user) {
-            console.log("✅ Redirect success:", result.user.email);
-        } else {
-            console.log("⚠️ No redirect result (normal on first load)");
-        }
-    } catch (error) {
-        console.error("❌ Redirect error:", error.message);
-    }
-}
-
-window.handleGoogleRedirect = handleGoogleRedirect;

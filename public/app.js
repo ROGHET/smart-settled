@@ -2,14 +2,6 @@
 
 let redirectHandled = false;
 
-// Run immediately after Firebase loads
-window.addEventListener("load", async () => {
-    if (window.handleGoogleRedirect) {
-        await window.handleGoogleRedirect();
-    }
-    redirectHandled = true;
-});
-
 let currentUser = null, curGrp = null, people = [], settlementsList = [], expensesList = [];
 let pChart = null, bChart = null, sim = null;
 
@@ -21,12 +13,8 @@ let guestData = { groups: [], members: {}, expenses: {}, settlements: {} };
 // --- Google Auth Lock ---
 let isGoogleSigningIn = false;
 
-// --- Auth State ---
-auth.onAuthStateChanged(user => {
-    // 🚫 IGNORE early trigger before redirect completes
-    if (!redirectHandled) return;
-
-    console.log("Auth state changed:", user);
+function handleAuthState(user) {
+    console.log("Handling auth state for:", user ? user.email : "null");
 
     const authScreen = document.getElementById('auth-screen');
     const appContainer = document.getElementById('app-container');
@@ -57,6 +45,11 @@ auth.onAuthStateChanged(user => {
         }
         updateUserDisplay();
     }
+}
+
+// --- Auth State ---
+auth.onAuthStateChanged(user => {
+    handleAuthState(user);
 });
 
 function logout() {
