@@ -2,20 +2,43 @@
 let currentUser = null, curGrp = null, people = [], settlementsList = [], expensesList = [];
 let pChart = null, bChart = null, sim = null;
 
+// --- Guest Mode ---
+let isGuestMode = false;
+let guestIdCounter = 1;
+let guestData = { groups: [], members: {}, expenses: {}, settlements: {} };
+
 // --- Auth State ---
 auth.onAuthStateChanged(user => {
     if (user) {
         currentUser = user;
+        isGuestMode = false;
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-container').style.display = 'flex';
+        document.getElementById('guest-banner').style.display = 'none';
         lucide.createIcons();
         loadGrps();
     } else {
         currentUser = null;
-        document.getElementById('auth-screen').style.display = 'flex';
-        document.getElementById('app-container').style.display = 'none';
+        if (!isGuestMode) {
+            document.getElementById('auth-screen').style.display = 'flex';
+            document.getElementById('app-container').style.display = 'none';
+            document.getElementById('guest-banner').style.display = 'none';
+        }
     }
 });
+
+async function handleLogout() {
+    if (isGuestMode) {
+        isGuestMode = false;
+        guestData = { groups: [], members: {}, expenses: {}, settlements: {} };
+        document.getElementById('auth-screen').style.display = 'flex';
+        document.getElementById('app-container').style.display = 'none';
+        document.getElementById('guest-banner').style.display = 'none';
+        notify("Guest session ended", "success");
+    } else {
+        await logoutUser();
+    }
+}
 
 function showAuthError(msg) {
     const el = document.getElementById('auth-error');
@@ -25,11 +48,12 @@ function showAuthError(msg) {
 async function handleAuth(isSignup) {
     const email = document.getElementById('auth-email').value.trim();
     const pass = document.getElementById('auth-pass').value;
+    const rememberMe = document.getElementById('remember-me').checked;
     document.getElementById('auth-error').style.display = 'none';
     if (!email || !pass) return showAuthError('Email and password required.');
     try {
-        if (isSignup) await signupUser(email, pass);
-        else await loginUser(email, pass);
+        if (isSignup) await signupUser(email, pass, rememberMe);
+        else await loginUser(email, pass, rememberMe);
     } catch (e) {
         showAuthError(e.message.replace('Firebase: ', ''));
     }
@@ -51,6 +75,70 @@ function toggleAuthMode() {
         s.innerHTML = 'Don\'t have an account? <a href="#" onclick="toggleAuthMode();return false">Sign Up</a>';
     }
 }
+
+// --- Forgot Password ---
+async function handleForgotPassword() {
+    const email = document.getElementById('auth-email').value.trim();
+    if (!email) return showAuthError('Enter your email address first.');
+    try {
+        await sendResetEmail(email);
+        document.getElementById('auth-error').style.display = 'none';
+        notify('Reset link sent to ' + email, 'success');
+    } catch (e) {
+        showAuthError(e.message.replace('Firebase: ', ''));
+    }
+}
+
+// --- Google Sign-In ---
+async function handleGoogleLogin() {
+    const rememberMe = document.getElementById('remember-me').checked;
+    document.getElementById('auth-error').style.display = 'none';
+    try {
+        await loginWithGoogle(rememberMe);
+    } catch (e) {
+        if (e.code === 'auth/popup-closed-by-user') return;
+        showAuthError(e.message.replace('Firebase: ', ''));
+    }
+}
+
+// --- Guest Mode ---
+function enterGuestMode() {
+    isGuestMode = true;
+    guestIdCounter = 1;
+    guestData = { groups: [{ id: 'g1', name: 'My Group', userId: 'guest' }], members: { g1: [] }, expenses: { g1: [] }, settlements: { g1: [] } };
+    curGrp = 'g1';
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('app-container').style.display = 'flex';
+    document.getElementById('guest-banner').style.display = 'block';
+    document.getElementById('group-title').innerText = 'My Group';
+    people = []; expensesList = []; settlementsList = [];
+    lucide.createIcons();
+    renderGuestGroupList();
+    clearUI();
+}
+
+function renderGuestGroupList() {
+    const listEl = document.getElementById('grp-list');
+    listEl.innerHTML = guestData.groups.map(g => {
+        const safe = g.name.replace(/'/g, "\\'");
+        return `<div class="list-item" onclick="selGrp('${g.id}', '${safe}')" style="cursor:pointer;">${g.name}</div>`;
+    }).join("");
+}
+
+// --- Desktop Glow Effect (Login Page) ---
+document.addEventListener('DOMContentLoaded', function() {
+    const authScreen = document.getElementById('auth-screen');
+    if (authScreen) {
+        authScreen.addEventListener('mousemove', function(e) {
+            const glow = document.getElementById('auth-glow');
+            if (glow) {
+                glow.style.setProperty('--mouse-x', e.clientX + 'px');
+                glow.style.setProperty('--mouse-y', e.clientY + 'px');
+            }
+        });
+    }
+    lucide.createIcons();
+});
 
 // --- Navigation ---
 function switchSection(id, element) {
@@ -100,6 +188,7 @@ async function refresh() {
 
 // --- Groups ---
 async function loadGrps() {
+    if (isGuestMode) { renderGuestGroupList(); await refresh(); return; }
     try {
         const snap = await db.collection('groups').where('userId', '==', currentUser.uid).get();
         const data = [];
@@ -136,6 +225,14 @@ async function addGrp() {
     const el = document.getElementById('new-grp-name');
     const name = el.value.trim();
     if (!name) return;
+    if (isGuestMode) {
+        const id = 'g' + (++guestIdCounter);
+        guestData.groups.push({ id, name, userId: 'guest' });
+        guestData.members[id] = []; guestData.expenses[id] = []; guestData.settlements[id] = [];
+        el.value = ""; curGrp = id;
+        document.getElementById('group-title').innerText = name;
+        renderGuestGroupList(); clearUI(); return;
+    }
     await db.collection('groups').add({ name, userId: currentUser.uid, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
     el.value = "";
     await loadGrps();
@@ -143,6 +240,14 @@ async function addGrp() {
 
 async function deleteGrp() {
     if (!curGrp || !confirm("Permanently delete this group and all its data?")) return;
+    if (isGuestMode) {
+        guestData.groups = guestData.groups.filter(g => g.id !== curGrp);
+        delete guestData.members[curGrp]; delete guestData.expenses[curGrp]; delete guestData.settlements[curGrp];
+        curGrp = guestData.groups.length ? guestData.groups[0].id : null;
+        if (curGrp) document.getElementById('group-title').innerText = guestData.groups[0].name;
+        else document.getElementById('group-title').innerText = 'Create a Group';
+        notify("Group Deleted", "error"); renderGuestGroupList(); people=[]; expensesList=[]; settlementsList=[]; clearUI(); return;
+    }
     const uid = currentUser.uid;
     const batch = db.batch();
     const cols = ['members', 'expenses', 'settlements'];
@@ -159,6 +264,10 @@ async function deleteGrp() {
 
 async function clearGrpData() {
     if (!curGrp || !confirm("Wipe all members and expenses from this group?")) return;
+    if (isGuestMode) {
+        guestData.members[curGrp] = []; guestData.expenses[curGrp] = []; guestData.settlements[curGrp] = [];
+        people=[]; expensesList=[]; settlementsList=[]; notify("Data Wiped", "error"); computeStatus(); clearUI(); return;
+    }
     const uid = currentUser.uid;
     const batch = db.batch();
     const cols = ['members', 'expenses', 'settlements'];
@@ -173,9 +282,13 @@ async function clearGrpData() {
 
 // --- Members ---
 async function loadPpl() {
-    const snap = await db.collection('members').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
-    people = [];
-    snap.forEach(doc => people.push(doc.data().name));
+    if (isGuestMode) {
+        people = (guestData.members[curGrp] || []).slice();
+    } else {
+        const snap = await db.collection('members').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
+        people = [];
+        snap.forEach(doc => people.push(doc.data().name));
+    }
     document.getElementById('people-list').innerHTML = people.length ?
         people.map(p => `<div class="list-item"><span>${p}</span></div>`).join("") :
         '<p style="color:var(--text-dim); font-size:0.85rem; padding:10px; text-align:center;">No members yet.</p>';
@@ -188,6 +301,11 @@ async function loadPpl() {
 async function addMem() {
     const el = document.getElementById('member-search');
     if (!el.value.trim()) return;
+    if (isGuestMode) {
+        if (!guestData.members[curGrp]) guestData.members[curGrp] = [];
+        guestData.members[curGrp].push(el.value.trim());
+        el.value = ""; await refresh(); return;
+    }
     await db.collection('members').add({ name: el.value.trim(), groupId: curGrp, userId: currentUser.uid });
     el.value = "";
     await refresh();
@@ -195,13 +313,17 @@ async function addMem() {
 
 // --- Expenses ---
 async function loadEx() {
-    const snap = await db.collection('expenses').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
-    expensesList = [];
-    snap.forEach(doc => expensesList.push({ id: doc.id, ...doc.data() }));
-    expensesList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    if (isGuestMode) {
+        expensesList = (guestData.expenses[curGrp] || []).slice();
+    } else {
+        const snap = await db.collection('expenses').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
+        expensesList = [];
+        snap.forEach(doc => expensesList.push({ id: doc.id, ...doc.data() }));
+        expensesList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    }
     const container = document.getElementById('ex-history');
     container.innerHTML = expensesList.length ? expensesList.map(e => {
-        const date = e.createdAt?.toDate ? e.createdAt.toDate().toISOString().split('T')[0] : '';
+        const date = e.createdAt?.toDate ? e.createdAt.toDate().toISOString().split('T')[0] : (e.date || '');
         return `<div class="list-item">
             <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
             <div style="text-align:right"><strong>₹${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
@@ -215,10 +337,15 @@ async function addEx() {
     const d = document.getElementById('ex-desc').value;
     const parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
     if (!a || !parts.length) return notify("Missing amount or split!", "error");
-    await db.collection('expenses').add({
-        groupId: curGrp, userId: currentUser.uid, payer: p, amount: a,
-        description: d, participants: parts, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    if (isGuestMode) {
+        if (!guestData.expenses[curGrp]) guestData.expenses[curGrp] = [];
+        guestData.expenses[curGrp].push({ id: 'e'+(++guestIdCounter), payer:p, amount:a, description:d, participants:parts, date:new Date().toISOString().split('T')[0] });
+    } else {
+        await db.collection('expenses').add({
+            groupId: curGrp, userId: currentUser.uid, payer: p, amount: a,
+            description: d, participants: parts, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    }
     document.getElementById('ex-amt').value = "";
     document.getElementById('ex-desc').value = "";
     await refresh();
@@ -226,10 +353,14 @@ async function addEx() {
 
 // --- Settlements ---
 async function loadSettlements() {
-    const snap = await db.collection('settlements').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
-    settlementsList = [];
-    snap.forEach(doc => settlementsList.push({ id: doc.id, ...doc.data() }));
-    settlementsList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    if (isGuestMode) {
+        settlementsList = (guestData.settlements[curGrp] || []).slice();
+    } else {
+        const snap = await db.collection('settlements').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
+        settlementsList = [];
+        snap.forEach(doc => settlementsList.push({ id: doc.id, ...doc.data() }));
+        settlementsList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    }
     filterSettle();
 }
 
@@ -247,10 +378,15 @@ function filterSettle() {
 }
 
 async function settleNow(f, t, a) {
-    await db.collection('settlements').add({
-        groupId: curGrp, userId: currentUser.uid, payer: f, receiver: t, amount: a,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    if (isGuestMode) {
+        if (!guestData.settlements[curGrp]) guestData.settlements[curGrp] = [];
+        guestData.settlements[curGrp].push({ id:'s'+(++guestIdCounter), payer:f, receiver:t, amount:a, date:new Date().toLocaleString() });
+    } else {
+        await db.collection('settlements').add({
+            groupId: curGrp, userId: currentUser.uid, payer: f, receiver: t, amount: a,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    }
     notify("Payment Recorded!");
     await refresh();
 }

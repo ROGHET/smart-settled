@@ -20,7 +20,11 @@ const db = firebase.firestore();
 
 // --- Auth Helpers ---
 
-async function loginUser(email, password) {
+async function loginUser(email, password, rememberMe = true) {
+    const persistence = rememberMe
+        ? firebase.auth.Auth.Persistence.LOCAL
+        : firebase.auth.Auth.Persistence.SESSION;
+    await auth.setPersistence(persistence);
     try {
         await auth.signInWithEmailAndPassword(email, password);
     } catch (err) {
@@ -28,7 +32,11 @@ async function loginUser(email, password) {
     }
 }
 
-async function signupUser(email, password) {
+async function signupUser(email, password, rememberMe = true) {
+    const persistence = rememberMe
+        ? firebase.auth.Auth.Persistence.LOCAL
+        : firebase.auth.Auth.Persistence.SESSION;
+    await auth.setPersistence(persistence);
     try {
         await auth.createUserWithEmailAndPassword(email, password);
     } catch (err) {
@@ -38,4 +46,20 @@ async function signupUser(email, password) {
 
 async function logoutUser() {
     await auth.signOut();
+}
+
+// --- Password Reset ---
+async function sendResetEmail(email) {
+    await auth.sendPasswordResetEmail(email);
+}
+
+// --- Google Sign-In ---
+const googleProvider = new firebase.auth.GoogleAuthProvider();
+
+async function loginWithGoogle(rememberMe = true) {
+    const persistence = rememberMe
+        ? firebase.auth.Auth.Persistence.LOCAL
+        : firebase.auth.Auth.Persistence.SESSION;
+    await auth.setPersistence(persistence);
+    await auth.signInWithPopup(googleProvider);
 }
