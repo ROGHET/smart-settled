@@ -164,7 +164,7 @@
 
         /* --- Mobile Responsive --- */
         #menu-toggle { display:none; background:transparent; border:none; color:var(--text-main); cursor:pointer; padding:5px; }
-        #sidebar-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); backdrop-filter:blur(4px); z-index:90; }
+        #sidebar-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); backdrop-filter:blur(4px); z-index:90; pointer-events:auto; }
 
         @media (max-width:768px) {
             #auth-glow { display:none; }
@@ -252,7 +252,7 @@
 
         <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
         <div class="sidebar" id="main-sidebar">
-            <div class="logo">
+            <div class="logo" id="app-logo" style="cursor:pointer">
                 <i data-lucide="network"></i>
                 <span>SmartSettled</span>
             </div>

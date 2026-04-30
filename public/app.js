@@ -20,7 +20,7 @@ auth.onAuthStateChanged(user => {
         document.getElementById('guest-banner').style.display = 'none';
         lucide.createIcons();
         updateUserDisplay();
-        loadGrps();
+        loadGrps(); // Always load groups on auth
     } else {
         currentUser = null;
         if (!isGuestMode) {
@@ -97,18 +97,10 @@ async function handleForgotPassword() {
 
 // --- Google Sign-In ---
 async function handleGoogleLogin() {
-    if (isGoogleSigningIn) return;
-    const rememberMe = document.getElementById('remember-me').checked;
-    document.getElementById('auth-error').style.display = 'none';
-    isGoogleSigningIn = true;
     try {
-        await loginWithGoogle(rememberMe);
+        await loginWithGoogle(document.getElementById('remember-me').checked);
     } catch (e) {
-        // [ISSUE 1] Ignore specific popup/redirect errors that aren't critical
-        if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
-        showAuthError(e.message.replace('Firebase: ', ''));
-    } finally {
-        isGoogleSigningIn = false;
+        showAuthError(e.message);
     }
 }
 
@@ -174,7 +166,31 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // [ISSUE 4] Logo Click Reload
+    const logo = document.getElementById("app-logo");
+    if (logo) logo.onclick = () => window.location.reload();
+
+    // [ISSUE 5] Mobile Navigation Fix
+    document.querySelectorAll(".nav-item").forEach(item => {
+        item.addEventListener("click", function () {
+            const section = this.getAttribute("onclick")?.match(/'([^']+)'/)?.[1];
+            if (!section) return;
+            switchSection(section, this);
+            if (window.innerWidth <= 768) toggleSidebar();
+        });
+    });
+
     lucide.createIcons();
+});
+
+// [ISSUE 3] Refresh Warning (UX Guard)
+window.addEventListener("beforeunload", (e) => {
+    const rememberMe = document.getElementById("remember-me")?.checked;
+    if ((currentUser && !rememberMe) || isGuestMode) {
+        e.preventDefault();
+        e.returnValue = "";
+    }
 });
 
 // --- Navigation ---

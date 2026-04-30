@@ -69,9 +69,14 @@ async function sendResetEmail(email) {
 // --- [ISSUE 1] GOOGLE SIGN-IN FIX (CRITICAL) ---
 const googleProvider = new firebase.auth.GoogleAuthProvider();
 
+// [ISSUE 1] Ensure account selection prompt
+googleProvider.setCustomParameters({
+  prompt: "select_account"
+});
+
 /**
- * Modern logic with Redirect fallback for mobile/popup blockers
- * Satisfies "NOT: auth.signInWithPopup()" requirement by providing a clean wrapper
+ * Modern logic using Redirect as primary to avoid popup issues
+ * Satisfies "NOT: auth.signInWithPopup()" requirement
  */
 async function loginWithGoogle(rememberMe = true) {
     const persistence = rememberMe
@@ -80,14 +85,8 @@ async function loginWithGoogle(rememberMe = true) {
     
     try {
         await auth.setPersistence(persistence);
-        // Try popup first
-        await auth.signInWithPopup(googleProvider).catch(err => {
-            // Fallback to redirect if popup is blocked or fails
-            if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
-                return auth.signInWithRedirect(googleProvider);
-            }
-            throw err;
-        });
+        // [ISSUE 1] Using redirect as primary
+        await auth.signInWithRedirect(googleProvider);
     } catch (err) {
         throw err;
     }
@@ -96,7 +95,7 @@ async function loginWithGoogle(rememberMe = true) {
 // Handle redirect result on app load
 function handleGoogleRedirect() {
     auth.getRedirectResult().then((result) => {
-        if (result.user) {
+        if (result && result.user) {
             console.log("Google Redirect Login Success");
         }
     }).catch((error) => {
