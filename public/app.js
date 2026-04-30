@@ -1,10 +1,13 @@
 // SmartSettled — App Logic (Firebase Firestore + Auth)
 
+let redirectHandled = false;
+
 // Run immediately after Firebase loads
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("load", async () => {
     if (window.handleGoogleRedirect) {
-        window.handleGoogleRedirect();
+        await window.handleGoogleRedirect();
     }
+    redirectHandled = true;
 });
 
 let currentUser = null, curGrp = null, people = [], settlementsList = [], expensesList = [];
@@ -20,6 +23,9 @@ let isGoogleSigningIn = false;
 
 // --- Auth State ---
 auth.onAuthStateChanged(user => {
+    // 🚫 IGNORE early trigger before redirect completes
+    if (!redirectHandled) return;
+
     console.log("Auth state changed:", user);
 
     const authScreen = document.getElementById('auth-screen');
@@ -43,18 +49,13 @@ auth.onAuthStateChanged(user => {
     } else {
         currentUser = null;
 
-        // ⚠️ prevent flicker during redirect
-        setTimeout(() => {
-            if (!auth.currentUser) {
-                if (!isGuestMode) {
-                    if (authScreen) authScreen.style.display = 'flex';
-                    if (appContainer) appContainer.style.display = 'none';
-                    const guestBanner = document.getElementById('guest-banner');
-                    if (guestBanner) guestBanner.style.display = 'none';
-                }
-                updateUserDisplay();
-            }
-        }, 500);
+        if (!isGuestMode) {
+            if (authScreen) authScreen.style.display = 'flex';
+            if (appContainer) appContainer.style.display = 'none';
+            const guestBanner = document.getElementById('guest-banner');
+            if (guestBanner) guestBanner.style.display = 'none';
+        }
+        updateUserDisplay();
     }
 });
 
@@ -185,6 +186,14 @@ function renderGuestGroupList() {
 // --- User Display & UI ---
 function updateUserDisplay() {
     const el = document.getElementById('user-display');
+    const changeBtn = document.getElementById("change-username");
+
+    if (currentUser) {
+        changeBtn?.classList.remove("disabled-option");
+    } else {
+        changeBtn?.classList.add("disabled-option");
+    }
+
     if (!el) return;
     if (isGuestMode) {
         el.innerHTML = `<div class="avatar-circle">G</div><span>Guest Mode</span>`;
@@ -247,7 +256,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    document.getElementById("change-username")?.addEventListener("click", changeUsername);
+    document.getElementById("change-username")?.addEventListener("click", () => {
+        if (!auth.currentUser) {
+            alert("Login required to change username");
+            return;
+        }
+        changeUsername();
+    });
     document.getElementById("logout-btn")?.addEventListener("click", logout);
 
     // [ISSUE 5] Mobile Navigation Fix (Call)

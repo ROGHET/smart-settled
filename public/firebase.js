@@ -84,6 +84,9 @@ async function loginWithGoogle(rememberMe = true) {
         : firebase.auth.Auth.Persistence.SESSION;
     
     const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({
+        prompt: "select_account"
+    });
 
     await auth.setPersistence(persistence);
 
@@ -97,30 +100,11 @@ async function handleGoogleRedirect() {
         const result = await auth.getRedirectResult();
 
         if (result && result.user) {
-            console.log("Redirect login success:", result.user.email);
-
-            // 🔥 IMPORTANT: delay to allow auth state propagation
-            setTimeout(() => {
-                const user = auth.currentUser;
-
-                if (user) {
-                    console.log("User detected after redirect:", user.email);
-
-                    document.getElementById('auth-screen').style.display = 'none';
-                    document.getElementById('app-container').style.display = 'flex';
-                    
-                    const guestBanner = document.getElementById('guest-banner');
-                    if (guestBanner) guestBanner.style.display = 'none';
-
-                    if (typeof window.lucide !== 'undefined') window.lucide.createIcons();
-                    if (typeof window.updateUserDisplay === "function") window.updateUserDisplay();
-
-                    if (typeof loadGrps === "function") loadGrps();
-                }
-            }, 300);
+            console.log("✅ Redirect success:", result.user.email);
+        } else {
+            console.log("⚠️ No redirect result (normal on first load)");
         }
-
     } catch (error) {
-        console.error("Redirect error:", error.message);
+        console.error("❌ Redirect error:", error.message);
     }
 }
