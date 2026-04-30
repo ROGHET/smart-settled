@@ -171,18 +171,48 @@ document.addEventListener('DOMContentLoaded', function() {
     const logo = document.getElementById("app-logo");
     if (logo) logo.onclick = () => window.location.reload();
 
-    // [ISSUE 5] Mobile Navigation Fix
-    document.querySelectorAll(".nav-item").forEach(item => {
-        item.addEventListener("click", function () {
-            const section = this.getAttribute("onclick")?.match(/'([^']+)'/)?.[1];
-            if (!section) return;
-            switchSection(section, this);
-            if (window.innerWidth <= 768) toggleSidebar();
-        });
+    // [ISSUE 5] Mobile Navigation Fix (Call)
+    setupMobileNavigation();
+
+    document.querySelectorAll(".section").forEach(sec => {
+        sec.style.display = "none";
     });
+    document.getElementById("dashboard").style.display = "block";
 
     lucide.createIcons();
 });
+
+function setupMobileNavigation() {
+  const navItems = document.querySelectorAll(".nav-item");
+
+  navItems.forEach(item => {
+    item.addEventListener("click", function () {
+      const sectionId = this.getAttribute("onclick")
+        ?.match(/'([^']+)'/)?.[1];
+
+      if (!sectionId) return;
+
+      // remove active from nav
+      navItems.forEach(i => i.classList.remove("active"));
+      this.classList.add("active");
+
+      // hide all sections
+      document.querySelectorAll(".section").forEach(sec => {
+        sec.style.display = "none";
+      });
+
+      // show only target
+      const target = document.getElementById(sectionId);
+      if (target) target.style.display = "block";
+
+      // close sidebar (mobile)
+      if (window.innerWidth <= 768) {
+        document.getElementById("main-sidebar")?.classList.remove("open");
+        document.getElementById("sidebar-overlay")?.classList.remove("open");
+      }
+    });
+  });
+}
 
 // [ISSUE 3] Refresh Warning (UX Guard)
 window.addEventListener("beforeunload", (e) => {
