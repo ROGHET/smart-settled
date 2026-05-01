@@ -847,7 +847,7 @@ function computeStatus() {
     optList.innerHTML = optimized.length ? optimized.map(t => {
         const sf = t.from.replace(/'/g, "\\'"), st = t.to.replace(/'/g, "\\'");
         return `<div class="list-item">
-            <span>${t.from} → ${t.to} <strong style="color:var(--primary-light)">₹${t.amount}</strong></span>
+            <span>${t.from} <i data-lucide="arrow-right" style="width:14px;height:14px;margin:0 4px;vertical-align:middle;color:var(--text-dim)"></i> ${t.to} <strong style="color:var(--primary-light)">₹${t.amount}</strong></span>
             <button class="btn btn-primary btn-sm" onclick="settleNow('${sf}', '${st}', ${t.amount})">Mark Paid</button>
         </div>`;
     }).join("") : '<div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.2); padding:1rem; border-radius:12px; color:#10b981; font-size:0.9rem; text-align:center;">All accounts settled!</div>';
@@ -1277,7 +1277,9 @@ function renderUsersTab() {
     }
     
     const details = currentGroupData.collaboratorDetails || {};
-    const uids = currentGroupData.contributorUids || [];
+    
+    // Ensure admin is always in the list (handles legacy groups created before this feature)
+    const uids = Array.from(new Set([...(currentGroupData.contributorUids || []), currentGroupData.userId]));
     
     // Check for duplicate names
     const nameCounts = {};

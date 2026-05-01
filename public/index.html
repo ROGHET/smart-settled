@@ -183,6 +183,8 @@
         #profile-dropdown.show {
             display: block;
         }
+        .hidden { display: none !important; }
+        .hidden.show { display: block !important; }
         .dropdown-item {
             padding: 10px;
             cursor: pointer;
@@ -321,10 +323,10 @@
     <div id="auth-screen">
         <div id="auth-glow"></div>
         <div class="auth-card" style="position:relative; z-index:10001;">
-            <div class="auth-logo">
+            <a href="/" class="auth-logo" style="text-decoration:none;">
                 <i data-lucide="network"></i>
                 <span>SmartSettled</span>
-            </div>
+            </a>
             <p class="auth-subtitle">Effortless group expense splitting</p>
             <div id="auth-error"></div>
             <h2 id="auth-title" style="font-size:1.3rem; margin-bottom:1.2rem; text-align:center;">Sign In</h2>
@@ -344,8 +346,8 @@
             <p class="auth-switch" id="auth-switch">Don't have an account? <a href="#" onclick="toggleAuthMode();return false">Sign Up</a></p>
             <button class="guest-btn" onclick="enterGuestMode()">Continue as Guest</button>
             <div class="auth-credits">
-                <span>Developed by Harshit Rawat</span><br>
-                <span>With contributions from Kaushiki Choubey</span>
+                <span>Developed by <a href="https://www.linkedin.com/in/harshit-rawat-956850298/" target="_blank" style="color:var(--primary-light); text-decoration:none;">Harshit Rawat</a></span><br>
+                <span>With contributions from <a href="https://www.linkedin.com/in/kaushiki-choubey-a38215320/" target="_blank" style="color:var(--primary-light); text-decoration:none;">Kaushiki Choubey</a></span>
                 <p style="margin-top: 10px; font-size: 0.8rem;">
                   <a href="/privacy.html" style="color:var(--primary-light); text-decoration:none;">Privacy Policy</a> |
                   <a href="/terms.html" style="color:var(--primary-light); text-decoration:none;">Terms of Service</a>
@@ -377,7 +379,7 @@
             </div>
 
             <div class="signature">
-                <span>By Harshit Rawat</span>
+                <span>By <a href="https://www.linkedin.com/in/harshit-rawat-956850298/" target="_blank" style="color:inherit; text-decoration:underline;">Harshit Rawat</a></span>
                 <button class="btn btn-logout btn-sm" onclick="logout()"><i data-lucide="log-out" style="width:14px;height:14px"></i> Sign Out</button>
             </div>
         </div>
