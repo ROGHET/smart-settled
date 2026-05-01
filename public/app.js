@@ -375,17 +375,35 @@ async function refresh() {
 async function loadGrps() {
     if (isGuestMode) { renderGuestGroupList(); await refresh(); return; }
     try {
-        const snap = await db.collection('groups').where('userId', '==', currentUser.uid).get();
-        const data = [];
-        snap.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+        const uid = currentUser.uid;
+        const ownedSnap = await db.collection('groups').where('userId', '==', uid).get();
+        const sharedSnap = await db.collection('groups').where('contributorUids', 'array-contains', uid).get();
+        
+        const dataMap = new Map();
+        ownedSnap.forEach(doc => dataMap.set(doc.id, { id: doc.id, ...doc.data() }));
+        sharedSnap.forEach(doc => dataMap.set(doc.id, { id: doc.id, ...doc.data() }));
+        
+        const data = Array.from(dataMap.values());
         data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+        
+        window.allUserGroups = data; // store for reference
+        
         const listEl = document.getElementById('grp-list');
         listEl.innerHTML = data.map(g => {
             const safe = (g.name || '').replace(/'/g, "\\'");
+            const isOwner = g.userId === uid;
+            const iconType = isOwner ? 'folder' : 'users';
+            
+            // Owners can edit/delete. Shared users can leave.
+            const actions = isOwner 
+                ? `<button class="grp-action-btn" onclick="editGrpName('${g.id}', '${safe}')" title="Edit"><i data-lucide="pencil" style="width:14px;height:14px;color:var(--text-main)"></i></button>
+                   <button class="grp-action-btn delete" onclick="deleteSpecificGrp('${g.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>`
+                : `<button class="grp-action-btn delete" onclick="leaveGrp('${g.id}')" title="Leave Group"><i data-lucide="log-out" style="width:14px;height:14px"></i></button>`;
+
             return `<div class="list-item grp-item">
+                <i data-lucide="${iconType}" style="width:16px;height:16px;color:var(--text-dim)"></i>
                 <span class="grp-item-name" onclick="selGrp('${g.id}', '${safe}')">${g.name}</span>
-                <button class="grp-action-btn" onclick="editGrpName('${g.id}', '${safe}')" title="Edit"><i data-lucide="pencil" style="width:14px;height:14px;color:var(--text-main)"></i></button>
-                <button class="grp-action-btn delete" onclick="deleteSpecificGrp('${g.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>
+                ${actions}
             </div>`;
         }).join("");
         if (window.lucide) lucide.createIcons();
@@ -423,7 +441,19 @@ async function addGrp() {
         document.getElementById('group-title').innerText = name;
         renderGuestGroupList(); clearUI(); return;
     }
-    await db.collection('groups').add({ name, userId: currentUser.uid, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    const uid = currentUser.uid;
+    const userName = currentUser.displayName || currentUser.email.split('@')[0];
+    const userEmail = currentUser.email;
+
+    await db.collection('groups').add({ 
+        name, 
+        userId: uid, 
+        contributorUids: [uid],
+        collaboratorDetails: {
+            [uid]: { name: userName, email: userEmail }
+        },
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() 
+    });
     el.value = "";
     await loadGrps();
 }
@@ -438,11 +468,18 @@ async function deleteGrp() {
         else document.getElementById('group-title').innerText = 'Create a Group';
         notify("Group Deleted", "error"); renderGuestGroupList(); people=[]; expensesList=[]; settlementsList=[]; clearUI(); return;
     }
-    const uid = currentUser.uid;
+    
+    // Admin check
+    const currentGroupData = window.allUserGroups?.find(g => g.id === curGrp);
+    if (currentGroupData && currentGroupData.userId !== currentUser.uid) {
+        notify("Only the creator can delete the group.", "error");
+        return;
+    }
+
     const batch = db.batch();
     const cols = ['members', 'expenses', 'settlements'];
     for (const col of cols) {
-        const snap = await db.collection(col).where('userId', '==', uid).where('groupId', '==', curGrp).get();
+        const snap = await db.collection(col).where('groupId', '==', curGrp).get();
         snap.forEach(doc => batch.delete(doc.ref));
     }
     batch.delete(db.collection('groups').doc(curGrp));
@@ -458,11 +495,18 @@ async function clearGrpData() {
         guestData.members[curGrp] = []; guestData.expenses[curGrp] = []; guestData.settlements[curGrp] = [];
         people=[]; expensesList=[]; settlementsList=[]; notify("Data Wiped", "error"); computeStatus(); clearUI(); return;
     }
-    const uid = currentUser.uid;
+    
+    // Admin check
+    const currentGroupData = window.allUserGroups?.find(g => g.id === curGrp);
+    if (currentGroupData && currentGroupData.userId !== currentUser.uid) {
+        notify("Only the creator can clear group data.", "error");
+        return;
+    }
+
     const batch = db.batch();
     const cols = ['members', 'expenses', 'settlements'];
     for (const col of cols) {
-        const snap = await db.collection(col).where('userId', '==', uid).where('groupId', '==', curGrp).get();
+        const snap = await db.collection(col).where('groupId', '==', curGrp).get();
         snap.forEach(doc => batch.delete(doc.ref));
     }
     await batch.commit();
@@ -470,12 +514,50 @@ async function clearGrpData() {
     await refresh();
 }
 
+async function leaveGrp(groupId) {
+    if (!confirm("Are you sure you want to leave this group?")) return;
+    try {
+        const docRef = db.collection('groups').doc(groupId);
+        
+        // Use a transaction to safely remove user and delete if empty
+        await db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(docRef);
+            if (!doc.exists) return;
+            const data = doc.data();
+            const uids = data.contributorUids || [];
+            const newUids = uids.filter(uid => uid !== currentUser.uid);
+            
+            if (newUids.length === 0) {
+                // If last person leaves, we could delete it, but let's just remove the uid.
+                // It might be orphaned, or we can handle full deletion here.
+                // Since this requires deleting subcollections, and transactions can't easily 
+                // do complex queries for subcollections safely, we'll just remove the UID.
+                // The group becomes inaccessible, which is fine.
+                transaction.update(docRef, { contributorUids: [] });
+            } else {
+                const details = data.collaboratorDetails || {};
+                delete details[currentUser.uid];
+                transaction.update(docRef, { 
+                    contributorUids: newUids,
+                    collaboratorDetails: details
+                });
+            }
+        });
+        
+        notify("Left the group");
+        await loadGrps();
+    } catch (e) {
+        console.error("Error leaving group", e);
+        notify("Failed to leave group", "error");
+    }
+}
+
 // --- Members ---
 async function loadPpl() {
     if (isGuestMode) {
         people = (guestData.members[curGrp] || []).slice();
     } else {
-        const snap = await db.collection('members').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
+        const snap = await db.collection('members').where('groupId', '==', curGrp).get();
         people = [];
         snap.forEach(doc => people.push(doc.data().name));
     }
@@ -593,7 +675,7 @@ async function loadEx() {
     if (isGuestMode) {
         expensesList = (guestData.expenses[curGrp] || []).slice();
     } else {
-        const snap = await db.collection('expenses').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
+        const snap = await db.collection('expenses').where('groupId', '==', curGrp).get();
         expensesList = [];
         snap.forEach(doc => expensesList.push({ id: doc.id, ...doc.data() }));
         expensesList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
@@ -639,7 +721,7 @@ async function loadSettlements() {
     if (isGuestMode) {
         settlementsList = (guestData.settlements[curGrp] || []).slice();
     } else {
-        const snap = await db.collection('settlements').where('userId', '==', currentUser.uid).where('groupId', '==', curGrp).get();
+        const snap = await db.collection('settlements').where('groupId', '==', curGrp).get();
         settlementsList = [];
         snap.forEach(doc => settlementsList.push({ id: doc.id, ...doc.data() }));
         settlementsList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
@@ -727,11 +809,14 @@ function optimizeDebts(balances) {
 // --- Status (computed client-side) ---
 function computeStatus() {
     const balances = {};
-    people.forEach(n => balances[n] = 0.0);
+    const spendingPerMember = {}; // Track actual spending for "Share" chart
+    people.forEach(n => { balances[n] = 0.0; spendingPerMember[n] = 0.0; });
     let totalSpent = 0;
     let totalSpentAll = 0; // Includes settled for dashboard display
     expensesList.forEach(e => {
         totalSpentAll += e.amount;
+        if (e.payer in spendingPerMember) spendingPerMember[e.payer] += e.amount;
+        
         if (e.settled) return; // Skip settled expenses in balance calculations
         totalSpent += e.amount;
         const parts = e.participants || [];
@@ -769,9 +854,11 @@ function computeStatus() {
 
     lucide.createIcons();
     if (document.getElementById('graph-view').classList.contains('active')) renderGraph(optimized);
-    if (document.getElementById('analytics').classList.contains('active')) renderCharts(balances);
+    if (document.getElementById('analytics').classList.contains('active')) renderCharts(balances, spendingPerMember);
+    renderUsersTab();
     window._lastBalances = balances;
     window._lastOptimized = optimized;
+    window._lastSpending = spendingPerMember;
 }
 
 // --- Graph ---
@@ -804,16 +891,60 @@ function renderGraph(links) {
 }
 
 // --- Charts ---
-async function renderCharts(balances) {
+async function renderCharts(balances, spendingPerMember) {
     const ctxP = document.getElementById('pie'), ctxB = document.getElementById('bar');
     if (!ctxP || ctxP.clientWidth === 0) return;
     if (!balances) balances = window._lastBalances || {};
-    const names = Object.keys(balances), vals = Object.values(balances);
+    if (!spendingPerMember) spendingPerMember = window._lastSpending || {};
+    
+    const names = Object.keys(balances);
     if (!names.length) return;
+    
     if (pChart) pChart.destroy();
     if (bChart) bChart.destroy();
-    pChart = new Chart(ctxP, { type: 'doughnut', data: { labels: names, datasets: [{ data: vals.map(v => Math.abs(v)), backgroundColor: ['#6366f1', '#f59e0b', '#ec4899', '#10b981', '#ef4444', '#8b5cf6'], borderColor: 'transparent' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { family: 'Outfit' } } } } } });
-    bChart = new Chart(ctxB, { type: 'bar', data: { labels: names, datasets: [{ data: vals, backgroundColor: vals.map(v => v >= 0 ? '#10b981' : '#ef4444'), borderRadius: 8 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { ticks: { color: '#94a3b8' }, grid: { display: false } } }, plugins: { legend: { display: false } } } });
+    
+    // Share chart shows total spending contribution
+    const spendingVals = names.map(n => spendingPerMember[n] || 0);
+    pChart = new Chart(ctxP, { 
+        type: 'doughnut', 
+        data: { 
+            labels: names, 
+            datasets: [{ 
+                data: spendingVals, 
+                backgroundColor: ['#6366f1', '#f59e0b', '#ec4899', '#10b981', '#ef4444', '#8b5cf6'], 
+                borderColor: 'transparent' 
+            }] 
+        }, 
+        options: { 
+            responsive: true, maintainAspectRatio: false, 
+            plugins: { 
+                legend: { position: 'bottom', labels: { color: '#94a3b8', font: { family: 'Outfit' } } },
+                tooltip: { callbacks: { label: function(context) { return ' ₹' + context.raw.toFixed(2); } } }
+            } 
+        } 
+    });
+    
+    // Bar chart shows current net position
+    const vals = Object.values(balances);
+    bChart = new Chart(ctxB, { 
+        type: 'bar', 
+        data: { 
+            labels: names, 
+            datasets: [{ 
+                data: vals, 
+                backgroundColor: vals.map(v => v >= 0 ? '#10b981' : '#ef4444'), 
+                borderRadius: 8 
+            }] 
+        }, 
+        options: { 
+            responsive: true, maintainAspectRatio: false, 
+            scales: { 
+                y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }, 
+                x: { ticks: { color: '#94a3b8' }, grid: { display: false } } 
+            }, 
+            plugins: { legend: { display: false } } 
+        } 
+    });
 }
 
 // --- PDF Export (jsPDF) ---
@@ -1020,20 +1151,84 @@ function generateInviteLink() {
     return `${window.location.origin}?group=${curGrp}`;
 }
 
-function shareGroup() {
+function shareGroup(type) {
     if (!curGrp) { notify("Select a group first!", "error"); return; }
-    const link = generateInviteLink();
-    if (!link) return;
+    
+    let textToCopy = "";
+    let successMsg = "";
+    
+    if (type === 'link') {
+        textToCopy = generateInviteLink();
+        successMsg = "Invite link copied to clipboard!";
+    } else if (type === 'id') {
+        textToCopy = curGrp;
+        successMsg = "Group ID copied to clipboard!";
+    } else {
+        return; // Modal should handle the type now
+    }
+    
+    if (!textToCopy) return;
 
     // Copy to clipboard
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(link).then(() => {
-            notify("Invite link copied to clipboard!");
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            notify(successMsg);
         }).catch(() => {
-            prompt("Copy this invite link:", link);
+            prompt("Copy this:", textToCopy);
         });
     } else {
-        prompt("Copy this invite link:", link);
+        prompt("Copy this:", textToCopy);
+    }
+}
+
+async function joinGrpById() {
+    if (isGuestMode) {
+        notify("Cannot join shared groups in guest mode.", "error");
+        return;
+    }
+    const groupId = prompt("Enter Group ID to join:");
+    if (!groupId || !groupId.trim()) return;
+    await processGroupJoin(groupId.trim());
+}
+
+async function processGroupJoin(sharedGroupId) {
+    try {
+        const docRef = db.collection('groups').doc(sharedGroupId);
+        const doc = await docRef.get();
+        
+        if (doc.exists) {
+            const groupData = doc.data();
+            const uids = groupData.contributorUids || [];
+            
+            // Add user if not already in the group
+            if (!uids.includes(currentUser.uid)) {
+                uids.push(currentUser.uid);
+                const details = groupData.collaboratorDetails || {};
+                const userName = currentUser.displayName || currentUser.email.split('@')[0];
+                details[currentUser.uid] = { name: userName, email: currentUser.email };
+                
+                await docRef.update({
+                    contributorUids: uids,
+                    collaboratorDetails: details
+                });
+            }
+            
+            curGrp = sharedGroupId;
+            document.getElementById('group-title').innerText = groupData.name || 'Shared Group';
+            
+            // Clean URL if we joined via link
+            if (window.location.search.includes('group=')) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+
+            await loadGrps(); // reload list
+            notify(`Joined group: ${groupData.name || 'Shared Group'}`);
+        } else {
+            notify("Shared group not found. Invalid ID or Link.", "error");
+        }
+    } catch (err) {
+        console.error("Error loading shared group:", err);
+        notify("Could not load shared group.", "error");
     }
 }
 
@@ -1056,27 +1251,75 @@ async function handleSharedGroupLink() {
     });
 
     await waitForAuth();
-
-    // Try to load the shared group
-    try {
-        const doc = await db.collection('groups').doc(sharedGroupId).get();
-        if (doc.exists) {
-            const groupData = doc.data();
-            curGrp = sharedGroupId;
-            document.getElementById('group-title').innerText = groupData.name || 'Shared Group';
-
-            // Clean URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-
-            await refresh();
-            notify(`Joined group: ${groupData.name || 'Shared Group'}`);
-        } else {
-            notify("Shared group not found.", "error");
-        }
-    } catch (err) {
-        console.error("Error loading shared group:", err);
-        notify("Could not load shared group.", "error");
+    
+    if (isGuestMode) {
+        notify("Please log in to join a shared group.", "error");
+        return;
     }
+
+    await processGroupJoin(sharedGroupId);
+}
+
+// --- Users Tab Rendering ---
+function renderUsersTab() {
+    const container = document.getElementById('collaborators-list');
+    if (!container) return;
+    
+    if (isGuestMode) {
+        container.innerHTML = '<p style="color:var(--text-dim); text-align:center; padding:1.5rem;">Guest mode uses local data. No online collaborators.</p>';
+        return;
+    }
+    
+    const currentGroupData = window.allUserGroups?.find(g => g.id === curGrp);
+    if (!currentGroupData) {
+        container.innerHTML = '<p style="color:var(--text-dim); text-align:center; padding:1.5rem;">Group data not found.</p>';
+        return;
+    }
+    
+    const details = currentGroupData.collaboratorDetails || {};
+    const uids = currentGroupData.contributorUids || [];
+    
+    // Check for duplicate names
+    const nameCounts = {};
+    const nameAssignments = {};
+    
+    uids.forEach(uid => {
+        const info = details[uid] || { name: 'Unknown User' };
+        const name = info.name;
+        if (!nameCounts[name]) {
+            nameCounts[name] = 1;
+            nameAssignments[uid] = name;
+        } else {
+            nameCounts[name]++;
+            nameAssignments[uid] = `${name} (User ${nameCounts[name]})`;
+            // Retroactively update the first one if it's the second occurrence
+            if (nameCounts[name] === 2) {
+                const firstUid = uids.find(u => details[u]?.name === name && u !== uid);
+                if (firstUid) nameAssignments[firstUid] = `${name} (User 1)`;
+            }
+        }
+    });
+    
+    container.innerHTML = uids.map(uid => {
+        const info = details[uid] || { email: 'Unknown' };
+        const displayName = nameAssignments[uid];
+        const isMe = uid === currentUser.uid;
+        const isAdmin = uid === currentGroupData.userId;
+        
+        let badges = '';
+        if (isAdmin) badges += '<span style="background:rgba(245,158,11,0.2); color:#f59e0b; font-size:0.65rem; padding:2px 6px; border-radius:4px; margin-left:8px;">Admin</span>';
+        if (isMe) badges += '<span style="background:rgba(99,102,241,0.2); color:#818cf8; font-size:0.65rem; padding:2px 6px; border-radius:4px; margin-left:8px;">You</span>';
+        
+        return `<div class="list-item">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div class="avatar-circle" style="width:36px; height:36px; font-size:1rem;">${displayName.charAt(0).toUpperCase()}</div>
+                <div>
+                    <strong>${displayName}</strong>${badges}<br>
+                    <small style="color:var(--text-dim)">${info.email}</small>
+                </div>
+            </div>
+        </div>`;
+    }).join("");
 }
 
 // Run shared group handler after load
