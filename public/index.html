@@ -38,12 +38,14 @@
             --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }
+        html, body { overflow-x: hidden; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; max-width: 100%; }
         body {
             background-color: var(--bg-dark);
             background-image: radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%);
-            color: var(--text-main); min-height: 100vh; display: flex; overflow: hidden;
+            color: var(--text-main); min-height: 100vh; display: flex; overflow-x: hidden;
         }
+        svg, canvas, img { max-width: none; }
 
         /* --- Auth Screen --- */
         #auth-screen {
@@ -84,7 +86,7 @@
         }
         .nav-item:hover, .nav-item.active { background: rgba(99, 102, 241, 0.2); color: var(--text-main); }
 
-        .main { flex: 1; height: 100vh; overflow-y: auto; padding: 2rem 3rem; scroll-behavior: smooth; }
+        .main { flex: 1; height: 100vh; overflow-y: auto; overflow-x: hidden; padding: 2rem 3rem; scroll-behavior: smooth; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5rem; }
 
         .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; margin-bottom: 2rem; }
@@ -242,11 +244,30 @@
         .group-close-btn { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.1); color: white; border: none; border-radius: 8px; padding: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; }
         .group-close-btn:hover { background: rgba(255,255,255,0.2); }
 
+        /* --- Settled Expense --- */
+        .settled-expense { opacity: 0.5; position: relative; }
+        .settled-expense::after { content: 'SETTLED'; position: absolute; top: 50%; right: 12px; transform: translateY(-50%); background: rgba(16,185,129,0.2); color: #10b981; font-size: 0.65rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; letter-spacing: 0.5px; }
+        .settle-expense-btn { background: transparent; border: 1px solid var(--primary); color: var(--primary-light); padding: 4px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: 'Outfit', sans-serif; transition: 0.2s; white-space: nowrap; }
+        .settle-expense-btn:hover { background: var(--primary); color: white; }
+
+        /* --- Group Action Buttons (Edit/Delete in modal) --- */
+        .grp-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .grp-item-name { flex: 1; cursor: pointer; padding: 8px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .grp-item-name:hover { color: var(--primary-light); }
+        .grp-action-btn { background: transparent; border: none; cursor: pointer; opacity: 0.5; transition: 0.2s; display: flex; align-items: center; justify-content: center; padding: 4px; }
+        .grp-action-btn:hover { opacity: 1; transform: scale(1.15); }
+        .grp-action-btn.delete:hover { color: #ef4444; }
+
+        /* --- Share Link Box --- */
+        .share-box { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+        .share-box input { flex: 1; margin-bottom: 0; font-size: 0.8rem; padding: 8px 10px; }
+        .share-box button { padding: 8px 14px; white-space: nowrap; }
+
         @media (max-width:768px) {
             #auth-glow { display:none; }
             #menu-toggle { display:block; }
-            body { flex-direction:column; overflow:auto; }
-            #app-container { justify-content: center; align-items: center; padding: 10px; }
+            body { flex-direction:column; overflow-x:hidden; overflow-y:auto; }
+            #app-container { justify-content: center; align-items: center; padding: 10px; overflow-x: hidden; width: 100%; }
             .mobile-add-btn { display: block; }
             .sidebar { 
                 position:fixed; top:0; left:0; width:280px; height:100vh; 
@@ -261,7 +282,8 @@
             .sidebar .signature { display:block; margin-top:auto; }
             .sidebar .dm-tag { display:block; margin-bottom:2rem; }
             
-            .main { padding:1rem; height:auto; overflow:visible; max-width: 100%; margin: auto; }
+            .main { padding:1rem; height:auto; overflow-x:hidden; overflow-y:visible; max-width: 100%; margin: auto; }
+            .section { padding: 12px; margin: 0 auto; max-width: 100%; }
             .dashboard-grid { grid-template-columns:repeat(2,1fr); }
             .auth-card { margin:1rem; max-width:95%; }
             #graph-container { height:300px; }
@@ -281,6 +303,9 @@
             /* [ISSUE 7] REPORT UI POLISHING */
             .report-controls { flex-direction: column !important; gap: 0.75rem !important; }
             .report-controls button, .report-controls select { width: 100% !important; height: 40px; }
+
+            /* Group modal mobile */
+            #grp-modal { right: 10px !important; left: 10px !important; min-width: auto !important; }
         }
         @media (max-width:480px) {
             .dashboard-grid { grid-template-columns: 1fr; }
@@ -375,6 +400,7 @@
                         </div>
                     </div>
                     <div class="btn btn-primary btn-sm" onclick="toggleGrp()" id="switch-grp-btn">Switch Group <i data-lucide="chevron-down"></i></div>
+                    <div class="btn btn-sm" onclick="shareGroup()" style="background:rgba(255,255,255,0.08); border:1px solid var(--glass-border); color:var(--text-main);"><i data-lucide="share-2" style="width:14px;height:14px"></i></div>
                 </div>
             </div>
 
@@ -396,7 +422,7 @@
                         <div class="search-box">
                             <input type="text" id="member-search" placeholder="Add member name..." onkeypress="if(event.key==='Enter') addMem()">
                         </div>
-                        <button class="mobile-add-btn" onclick="addMemberPrompt()">+ Add Member</button>
+                        <button class="mobile-add-btn" onclick="addMem()">+ Add Member</button>
                         <div id="people-list"></div>
                     </div>
                 </div>
@@ -424,9 +450,13 @@
                     <div class="card-header">Settlement History</div>
                     <div class="search-box">
                         <i data-lucide="search"></i>
-                        <input type="text" id="settle-search" placeholder="Search settlements..." oninput="filterSettle()">
+                        <input type="text" id="settle-search" placeholder="Search settlements & expenses..." oninput="filterSettle()">
                     </div>
                     <div id="settle-history"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><i data-lucide="receipt" style="width:18px;height:18px"></i> Settled Expenses</div>
+                    <div id="settled-expenses-list"></div>
                 </div>
             </div>
 

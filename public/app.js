@@ -184,10 +184,15 @@ function enterGuestMode() {
 
 function renderGuestGroupList() {
     const listEl = document.getElementById('grp-list');
-    listEl.innerHTML = guestData.groups.map(g => {
+    listEl.innerHTML = guestData.groups.map((g, idx) => {
         const safe = g.name.replace(/'/g, "\\'");
-        return `<div class="list-item" onclick="selGrp('${g.id}', '${safe}')" style="cursor:pointer;">${g.name}</div>`;
+        return `<div class="list-item grp-item">
+            <span class="grp-item-name" onclick="selGrp('${g.id}', '${safe}')">${g.name}</span>
+            <button class="grp-action-btn" onclick="editGrpName('${g.id}', '${safe}')" title="Edit"><i data-lucide="pencil" style="width:14px;height:14px;color:var(--text-main)"></i></button>
+            <button class="grp-action-btn delete" onclick="deleteSpecificGrp('${g.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>
+        </div>`;
     }).join("");
+    if (window.lucide) lucide.createIcons();
 }
 
 // --- User Display & UI ---
@@ -313,12 +318,21 @@ window.addEventListener("beforeunload", (e) => {
 
 // --- Navigation ---
 function switchSection(id, element) {
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    // Enforce section isolation: hide ALL sections first
+    document.querySelectorAll('.section').forEach(s => {
+        s.classList.remove('active');
+        s.style.display = 'none';
+    });
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-    element.classList.add('active');
+    const target = document.getElementById(id);
+    if (target) {
+        target.classList.add('active');
+        target.style.display = 'block';
+    }
+    if (element) element.classList.add('active');
     if (id === 'analytics') setTimeout(() => renderCharts(), 100);
     if (id === 'graph-view') setTimeout(() => computeStatus(), 100);
+    if (id === 'settlements') renderSettledExpenses();
 }
 
 function notify(msg, type = 'success') {
@@ -368,8 +382,13 @@ async function loadGrps() {
         const listEl = document.getElementById('grp-list');
         listEl.innerHTML = data.map(g => {
             const safe = (g.name || '').replace(/'/g, "\\'");
-            return `<div class="list-item" onclick="selGrp('${g.id}', '${safe}')" style="cursor:pointer;">${g.name}</div>`;
+            return `<div class="list-item grp-item">
+                <span class="grp-item-name" onclick="selGrp('${g.id}', '${safe}')">${g.name}</span>
+                <button class="grp-action-btn" onclick="editGrpName('${g.id}', '${safe}')" title="Edit"><i data-lucide="pencil" style="width:14px;height:14px;color:var(--text-main)"></i></button>
+                <button class="grp-action-btn delete" onclick="deleteSpecificGrp('${g.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>
+            </div>`;
         }).join("");
+        if (window.lucide) lucide.createIcons();
         if (data.length > 0) {
             const current = curGrp ? data.find(g => g.id === curGrp) : null;
             const picked = current || data[0];
@@ -480,13 +499,15 @@ async function loadPpl() {
 
 async function addMem() {
     const el = document.getElementById('member-search');
-    if (!el.value.trim()) return;
+    const name = el.value.trim();
+    if (!curGrp) { notify("Please create or select a group first.", "error"); return; }
+    if (!name) { notify("Please enter a member name.", "error"); return; }
     if (isGuestMode) {
         if (!guestData.members[curGrp]) guestData.members[curGrp] = [];
-        guestData.members[curGrp].push(el.value.trim());
+        guestData.members[curGrp].push(name);
         el.value = ""; await refresh(); return;
     }
-    await db.collection('members').add({ name: el.value.trim(), groupId: curGrp, userId: currentUser.uid });
+    await db.collection('members').add({ name: name, groupId: curGrp, userId: currentUser.uid });
     el.value = "";
     await refresh();
 }
@@ -554,10 +575,12 @@ async function editMemberName(oldName) {
 }
 
 function addMemberPrompt() {
-    const name = prompt("Enter member name:");
-    if (!name) return;
-    document.getElementById('member-search').value = name;
-    addMem();
+    // Mobile: focus the input field so keyboard opens
+    const el = document.getElementById('member-search');
+    if (el) {
+        el.focus();
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
 }
 
 function collapseGroup() {
@@ -576,11 +599,17 @@ async function loadEx() {
         expensesList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     }
     const container = document.getElementById('ex-history');
-    container.innerHTML = expensesList.length ? expensesList.map(e => {
+    container.innerHTML = expensesList.length ? expensesList.map((e, idx) => {
         const date = e.createdAt?.toDate ? e.createdAt.toDate().toISOString().split('T')[0] : (e.date || '');
-        return `<div class="list-item">
+        const isSettled = e.settled === true;
+        const settledClass = isSettled ? ' settled-expense' : '';
+        const settleBtn = isSettled ? '' : `<button class="settle-expense-btn" onclick="settleExpense(${idx})">Settle</button>`;
+        return `<div class="list-item${settledClass}">
             <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
-            <div style="text-align:right"><strong>₹${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div style="text-align:right"><strong>₹${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
+                ${settleBtn}
+            </div>
         </div>`;
     }).join("") : '<p style="color:var(--text-dim); text-align:center; padding:2rem;">No expenses yet.</p>';
 }
@@ -620,15 +649,43 @@ async function loadSettlements() {
 
 function filterSettle() {
     const q = document.getElementById('settle-search').value.toLowerCase();
-    const filtered = settlementsList.filter(s => s.payer.toLowerCase().includes(q) || s.receiver.toLowerCase().includes(q));
+    // Search settlements
+    const filteredSettlements = settlementsList.filter(s => 
+        s.payer.toLowerCase().includes(q) || s.receiver.toLowerCase().includes(q)
+    );
+    // Also search expenses (settled and unsettled)
+    const filteredExpenses = expensesList.filter(e => 
+        (e.description || '').toLowerCase().includes(q) || 
+        (e.payer || '').toLowerCase().includes(q)
+    );
     const container = document.getElementById('settle-history');
-    container.innerHTML = filtered.length ? filtered.map(s => {
-        const date = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleString() : '';
-        return `<div class="list-item">
-            <div><strong>${s.payer} paid ${s.receiver}</strong><br><small style="color:var(--text-dim)">${date}</small></div>
-            <div style="color:var(--primary-light)">₹${s.amount}</div>
-        </div>`;
-    }).join("") : '<p style="color:var(--text-dim); text-align:center; padding:1.5rem;">No settlements found.</p>';
+    let html = '';
+    // Settlements
+    if (filteredSettlements.length) {
+        html += filteredSettlements.map(s => {
+            const date = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleString() : '';
+            return `<div class="list-item">
+                <div><strong>${s.payer} paid ${s.receiver}</strong><br><small style="color:var(--text-dim)">${date}</small></div>
+                <div style="color:var(--primary-light)">₹${s.amount}</div>
+            </div>`;
+        }).join("");
+    }
+    // Expenses matching search
+    if (filteredExpenses.length && q) {
+        html += `<div style="padding:8px 0 4px 0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;">Matching Expenses</div>`;
+        html += filteredExpenses.map(e => {
+            const date = e.createdAt?.toDate ? e.createdAt.toDate().toISOString().split('T')[0] : (e.date || '');
+            const status = e.settled ? '<span style="color:#10b981; font-size:0.7rem;">SETTLED</span>' : '<span style="color:var(--accent); font-size:0.7rem;">ACTIVE</span>';
+            return `<div class="list-item">
+                <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
+                <div style="text-align:right"><strong>₹${e.amount}</strong><br>${status} <small style="font-size:0.65rem">${date}</small></div>
+            </div>`;
+        }).join("");
+    }
+    if (!html) html = '<p style="color:var(--text-dim); text-align:center; padding:1.5rem;">No results found.</p>';
+    container.innerHTML = html;
+    // Also render settled expenses list
+    renderSettledExpenses();
 }
 
 async function settleNow(f, t, a) {
@@ -672,7 +729,10 @@ function computeStatus() {
     const balances = {};
     people.forEach(n => balances[n] = 0.0);
     let totalSpent = 0;
+    let totalSpentAll = 0; // Includes settled for dashboard display
     expensesList.forEach(e => {
+        totalSpentAll += e.amount;
+        if (e.settled) return; // Skip settled expenses in balance calculations
         totalSpent += e.amount;
         const parts = e.participants || [];
         if (parts.length) {
@@ -693,7 +753,7 @@ function computeStatus() {
     if (Object.keys(balances).length === 0) { highSpender = '-'; mostOwed = '-'; }
     const optimized = optimizeDebts(balances);
 
-    document.getElementById('st-total').innerText = `₹${totalSpent.toLocaleString()}`;
+    document.getElementById('st-total').innerText = `₹${totalSpentAll.toLocaleString()}`;
     document.getElementById('st-best').innerText = highSpender;
     document.getElementById('st-debtor').innerText = mostOwed;
     document.getElementById('st-count').innerText = expensesList.length;
@@ -853,4 +913,179 @@ async function expUser() {
         doc.save(`report_${userName}.pdf`);
         notify("User PDF Generated!");
     } catch (e) { console.error(e); notify("PDF generation failed.", "error"); }
+}
+
+// ========== NEW FEATURES ==========
+
+// --- FIX 6: Per-Expense Settlement ---
+async function settleExpense(index) {
+    const expense = expensesList[index];
+    if (!expense || expense.settled) return;
+
+    if (isGuestMode) {
+        const guestExpenses = guestData.expenses[curGrp];
+        if (guestExpenses && guestExpenses[index]) {
+            guestExpenses[index].settled = true;
+            guestExpenses[index].settledAt = new Date().toISOString();
+        }
+    } else {
+        // Update Firestore document
+        if (expense.id) {
+            await db.collection('expenses').doc(expense.id).update({
+                settled: true,
+                settledAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        }
+    }
+    notify("Expense settled!");
+    await refresh();
+}
+
+// --- Render settled expenses in Settlements tab ---
+function renderSettledExpenses() {
+    const container = document.getElementById('settled-expenses-list');
+    if (!container) return;
+    const settled = expensesList.filter(e => e.settled === true);
+    if (!settled.length) {
+        container.innerHTML = '<p style="color:var(--text-dim); text-align:center; padding:1.5rem;">No settled expenses yet.</p>';
+        return;
+    }
+    container.innerHTML = settled.map(e => {
+        const date = e.settledAt
+            ? (typeof e.settledAt === 'string' ? new Date(e.settledAt).toLocaleDateString() : (e.settledAt.toDate ? e.settledAt.toDate().toLocaleDateString() : ''))
+            : (e.createdAt?.toDate ? e.createdAt.toDate().toLocaleDateString() : (e.date || ''));
+        return `<div class="list-item" style="opacity:0.7;">
+            <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
+            <div style="text-align:right"><strong style="color:#10b981">₹${e.amount}</strong><br><small style="font-size:0.65rem; color:#10b981">Settled ${date}</small></div>
+        </div>`;
+    }).join("");
+}
+
+// --- FIX 4: Group Edit Name ---
+async function editGrpName(groupId, oldName) {
+    const newName = prompt("Edit group name:", oldName);
+    if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
+    const finalName = newName.trim();
+
+    if (isGuestMode) {
+        const group = guestData.groups.find(g => g.id === groupId);
+        if (group) group.name = finalName;
+        if (curGrp === groupId) document.getElementById('group-title').innerText = finalName;
+        renderGuestGroupList();
+    } else {
+        await db.collection('groups').doc(groupId).update({ name: finalName });
+        if (curGrp === groupId) document.getElementById('group-title').innerText = finalName;
+        await loadGrps();
+    }
+    notify("Group renamed!");
+}
+
+// --- FIX 4: Delete specific group from modal ---
+async function deleteSpecificGrp(groupId) {
+    if (!confirm("Delete this group and all its data?")) return;
+
+    if (isGuestMode) {
+        guestData.groups = guestData.groups.filter(g => g.id !== groupId);
+        delete guestData.members[groupId];
+        delete guestData.expenses[groupId];
+        delete guestData.settlements[groupId];
+        if (curGrp === groupId) {
+            curGrp = guestData.groups.length ? guestData.groups[0].id : null;
+            document.getElementById('group-title').innerText = curGrp ? guestData.groups[0].name : 'Create a Group';
+            people = []; expensesList = []; settlementsList = [];
+            clearUI();
+        }
+        renderGuestGroupList();
+        notify("Group Deleted", "error");
+        return;
+    }
+
+    const uid = currentUser.uid;
+    const batch = db.batch();
+    const cols = ['members', 'expenses', 'settlements'];
+    for (const col of cols) {
+        const snap = await db.collection(col).where('userId', '==', uid).where('groupId', '==', groupId).get();
+        snap.forEach(doc => batch.delete(doc.ref));
+    }
+    batch.delete(db.collection('groups').doc(groupId));
+    await batch.commit();
+    if (curGrp === groupId) curGrp = null;
+    notify("Group Deleted", "error");
+    await loadGrps();
+}
+
+// --- FIX 8: Group Sharing (Invite Link) ---
+function generateInviteLink() {
+    if (!curGrp) return null;
+    return `${window.location.origin}?group=${curGrp}`;
+}
+
+function shareGroup() {
+    if (!curGrp) { notify("Select a group first!", "error"); return; }
+    const link = generateInviteLink();
+    if (!link) return;
+
+    // Copy to clipboard
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(() => {
+            notify("Invite link copied to clipboard!");
+        }).catch(() => {
+            prompt("Copy this invite link:", link);
+        });
+    } else {
+        prompt("Copy this invite link:", link);
+    }
+}
+
+// --- FIX 8: Handle shared group link on load ---
+async function handleSharedGroupLink() {
+    const params = new URLSearchParams(window.location.search);
+    const sharedGroupId = params.get("group");
+
+    if (!sharedGroupId) return;
+
+    // Wait for auth to resolve
+    const waitForAuth = () => new Promise(resolve => {
+        if (currentUser || isGuestMode) return resolve();
+        const unsubscribe = auth.onAuthStateChanged(user => {
+            unsubscribe();
+            resolve();
+        });
+        // Timeout fallback
+        setTimeout(resolve, 3000);
+    });
+
+    await waitForAuth();
+
+    // Try to load the shared group
+    try {
+        const doc = await db.collection('groups').doc(sharedGroupId).get();
+        if (doc.exists) {
+            const groupData = doc.data();
+            curGrp = sharedGroupId;
+            document.getElementById('group-title').innerText = groupData.name || 'Shared Group';
+
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+
+            await refresh();
+            notify(`Joined group: ${groupData.name || 'Shared Group'}`);
+        } else {
+            notify("Shared group not found.", "error");
+        }
+    } catch (err) {
+        console.error("Error loading shared group:", err);
+        notify("Could not load shared group.", "error");
+    }
+}
+
+// Run shared group handler after load
+window.addEventListener("load", () => {
+    // Delay to let auth resolve first
+    setTimeout(handleSharedGroupLink, 1500);
+});
+
+// --- Total Spent counter (include settled for display) ---
+function getTotalSpentIncludingSettled() {
+    return expensesList.reduce((sum, e) => sum + e.amount, 0);
 }
