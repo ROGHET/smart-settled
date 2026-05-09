@@ -566,12 +566,14 @@ async function loadPpl() {
             const safeName = p.replace(/'/g, "\\'").replace(/"/g, "&quot;");
             return `<div class="list-item member-item">
                 <span class="member-name">${p}</span>
-                <button class="edit-member-btn" title="Edit name" onclick="editMemberName('${safeName}')">
-                    <i data-lucide="pencil" style="width:16px;height:16px;color:var(--text-main);"></i>
-                </button>
-                <button class="edit-member-btn remove-member-btn" title="Remove member" onclick="removeMember('${safeName}')">
-                    <i data-lucide="trash-2" style="width:16px;height:16px;"></i>
-                </button>
+                <div style="display:flex; gap:10px;">
+                    <button class="edit-member-btn" title="Edit name" onclick="editMemberName('${safeName}')">
+                        <i data-lucide="pencil" style="width:16px;height:16px;color:var(--text-main);"></i>
+                    </button>
+                    <button class="edit-member-btn remove-member-btn" title="Remove member" onclick="removeMember('${safeName}')">
+                        <i data-lucide="trash-2" style="width:16px;height:16px;"></i>
+                    </button>
+                </div>
             </div>`;
         }).join("") :
         '<p style="color:var(--text-dim); font-size:0.85rem; padding:10px; text-align:center;">No members yet.</p>';
@@ -742,11 +744,18 @@ function renderExpenseList(list) {
 
         // Single settle button
         let settleBtn = '';
-        if (!isFullySettled && nonPayerParts.length > 0) {
+        if (nonPayerParts.length > 0) {
             const safeId = String(e.id || idx).replace(/'/g, "\\'");
-            // Grey out if all participants already settled via dashboard (settledBy)
-            const allDashboardSettled = nonPayerParts.length > 0 && nonPayerParts.every(p => settledBy[p] === true);
-            if (allDashboardSettled) {
+            const myName = getCurrentMemberName();
+            const allDashboardSettled = nonPayerParts.every(p => settledBy[p] === true);
+            let shouldGreyOut = isFullySettled || allDashboardSettled;
+            
+            // Grey out if I am logged in, not the payer, and I already settled my share
+            if (!shouldGreyOut && myName && myName !== e.payer && settledBy[myName]) {
+                shouldGreyOut = true;
+            }
+
+            if (shouldGreyOut) {
                 settleBtn = `<div class="settle-all-row"><button class="settle-expense-btn" disabled style="opacity:0.35;cursor:not-allowed;border-color:var(--text-dim);color:var(--text-dim);">Settled</button></div>`;
             } else {
                 settleBtn = `<div class="settle-all-row"><button class="settle-expense-btn" onclick="settleExpense('${safeId}')">Settle</button></div>`;
@@ -782,12 +791,21 @@ function filterExpenses() {
 async function addEx() {
     const p = document.getElementById('ex-payer').value;
     const a = parseFloat(document.getElementById('ex-amt').value);
-    const d = document.getElementById('ex-desc').value.trim();
-    const parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
+    const d = document.getElementById('ex-desc').value.trim() || 'Expense';
+    let parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
     if (!a || !parts.length) return notify("Missing amount or split!", "error");
 
     const cs = window._unequalSplits || {};
     const hasCustom = Object.keys(cs).length > 0;
+    
+    if (hasCustom) {
+        // Filter out zero amount members
+        parts = parts.filter(person => (cs[person] || 0) > 0);
+        Object.keys(cs).forEach(person => { if ((cs[person] || 0) <= 0) delete cs[person]; });
+    }
+
+    if (!parts.length) return notify("All split amounts are zero!", "error");
+
     const expensePayload = { payer:p, amount:a, description:d, participants:parts };
     if (hasCustom) expensePayload.customSplits = { ...cs };
     window._unequalSplits = {}; // always reset
@@ -1059,7 +1077,13 @@ function renderGraph(links) {
         .force("center", d3.forceCenter(w / 2, h / 2))
         .force("x", d3.forceX(w / 2).strength(0.05))
         .force("y", d3.forceY(h / 2).strength(0.05));
-    svg.append("defs").append("marker").attr("id", "arr").attr("markerUnits", "userSpaceOnUse").attr("viewBox", "0 -5 10 10").attr("refX", 25).attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#6366f1");
+    svg.append("defs").append("marker")
+        .attr("id", "arr")
+        .attr("markerUnits", "userSpaceOnUse")
+        .attr("markerWidth", 10).attr("markerHeight", 10)
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 25).attr("orient", "auto")
+        .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#6366f1");
     const link = svg.selectAll("line").data(edges).join("line").attr("stroke", "rgba(99,102,241,0.4)").attr("stroke-width", 2).attr("marker-end", "url(#arr)");
     const node = svg.selectAll("g").data(nodes).join("g").call(d3.drag()
         .on("start", e => { if (!e.active) sim.alphaTarget(0.3).restart(); e.subject.fx = e.x; e.subject.fy = e.y; })
@@ -1558,12 +1582,11 @@ function getTotalSpentIncludingSettled() {
 window._unequalSplits = {};
 
 function openUnequalSplitModal() {
-    const descVal = document.getElementById('ex-desc').value.trim();
+    const descVal = document.getElementById('ex-desc').value.trim() || 'Expense';
     const amount = parseFloat(document.getElementById('ex-amt').value) || 0;
     const payer = document.getElementById('ex-payer').value;
     const allParts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
     // Validate required fields
-    if (!descVal) { notify("Enter a description first!", "error"); return; }
     if (!amount) { notify("Enter the expense amount first!", "error"); return; }
     if (!allParts.length) { notify("Select participants first!", "error"); return; }
     // Show all participants including payer
