@@ -984,7 +984,12 @@ function computeStatus() {
     expensesList.forEach(e => {
         totalSpentAll += e.amount;
         if (e.payer in spendingPerMember) spendingPerMember[e.payer] += e.amount;
-        if (e.settled) return; // fully settled (legacy flag) — skip
+        
+        // Legacy settled flag: if settled and no settledBy map, it means it was settled 
+        // without settlement records. We must skip it so debt disappears.
+        // If it has settledBy, it has corresponding settlement records, so we process it.
+        if (e.settled && (!e.settledBy || Object.keys(e.settledBy).length === 0)) return; 
+
         const parts = e.participants || [];
         if (!parts.length) return;
         totalSpent += e.amount;
@@ -1054,7 +1059,7 @@ function renderGraph(links) {
         .force("center", d3.forceCenter(w / 2, h / 2))
         .force("x", d3.forceX(w / 2).strength(0.05))
         .force("y", d3.forceY(h / 2).strength(0.05));
-    svg.append("defs").append("marker").attr("id", "arr").attr("viewBox", "0 -5 10 10").attr("refX", 25).attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#6366f1");
+    svg.append("defs").append("marker").attr("id", "arr").attr("markerUnits", "userSpaceOnUse").attr("viewBox", "0 -5 10 10").attr("refX", 25).attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#6366f1");
     const link = svg.selectAll("line").data(edges).join("line").attr("stroke", "rgba(99,102,241,0.4)").attr("stroke-width", 2).attr("marker-end", "url(#arr)");
     const node = svg.selectAll("g").data(nodes).join("g").call(d3.drag()
         .on("start", e => { if (!e.active) sim.alphaTarget(0.3).restart(); e.subject.fx = e.x; e.subject.fy = e.y; })
@@ -1226,19 +1231,52 @@ async function expUser() {
 
 // ========== NEW FEATURES ==========
 
-// --- Per-Expense Settlement (settles entire transaction) ---
+// --- Per-Expense Settlement (settles entire transaction by creating settlement records for unsettled shares) ---
 async function settleExpense(expId) {
     const expense = expensesList.find(e => e.id === String(expId));
     if (!expense || expense.settled) return;
 
+    const customSplits = expense.customSplits || {};
+    const defaultSplit = (expense.participants && expense.participants.length) ? expense.amount / expense.participants.length : 0;
+    const settledBy = expense.settledBy || {};
+    
+    const batch = !isGuestMode ? db.batch() : null;
+    const now = new Date().toLocaleString();
+
+    for (const p of (expense.participants || [])) {
+        if (p === expense.payer) continue;
+        if (settledBy[p]) continue; // already settled
+        
+        const split = customSplits[p] !== undefined ? customSplits[p] : defaultSplit;
+        if (split <= 0) continue;
+
+        if (isGuestMode) {
+            if (!guestData.settlements[curGrp]) guestData.settlements[curGrp] = [];
+            guestData.settlements[curGrp].push({ id:'s'+(++guestIdCounter), payer:p, receiver:expense.payer, amount:split, note: 'Settled ' + (expense.description||'Exp'), date:now });
+            settledBy[p] = true;
+        } else {
+            const sRef = db.collection('settlements').doc();
+            batch.set(sRef, {
+                groupId: curGrp, userId: currentUser.uid, payer: p, receiver: expense.payer, amount: split,
+                note: 'Settled ' + (expense.description||'Exp'),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            settledBy[p] = true;
+        }
+    }
+
     if (isGuestMode) {
-        const guestExp = (guestData.expenses[curGrp] || []).find(e => e.id === String(expId));
-        if (guestExp) { guestExp.settled = true; guestExp.settledAt = new Date().toISOString(); }
+        expense.settled = true;
+        expense.settledBy = settledBy;
+        expense.settledAt = new Date().toISOString();
     } else {
-        await db.collection('expenses').doc(String(expId)).update({
+        const eRef = db.collection('expenses').doc(String(expId));
+        batch.update(eRef, {
             settled: true,
+            settledBy: settledBy,
             settledAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        await batch.commit();
     }
     notify('Expense settled!');
     await refresh();
@@ -1528,9 +1566,9 @@ function openUnequalSplitModal() {
     if (!descVal) { notify("Enter a description first!", "error"); return; }
     if (!amount) { notify("Enter the expense amount first!", "error"); return; }
     if (!allParts.length) { notify("Select participants first!", "error"); return; }
-    // Show only non-payer participants (payer doesn't owe themselves)
-    const parts = allParts.filter(p => p !== payer);
-    if (!parts.length) { notify("Add other participants besides the payer!", "error"); return; }
+    // Show all participants including payer
+    const parts = allParts;
+    if (!parts.length) { notify("Add participants!", "error"); return; }
 
     document.getElementById('unequal-total-amt').textContent = amount.toFixed(2);
     document.getElementById('unequal-remaining').textContent = amount.toFixed(2);
