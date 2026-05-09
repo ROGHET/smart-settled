@@ -258,7 +258,7 @@
         .participant-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.82rem; }
         .p-name { color: var(--text-dim); flex: 1; }
         .settled-badge-sm { background: rgba(16,185,129,0.15); color: #10b981; font-size: 0.72rem; font-weight: 600; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
-        .settle-all-row { margin-top: 6px; display: flex; justify-content: flex-end; }
+        .settle-all-row { margin-top: 8px; display: flex; justify-content: flex-end; gap: 8px; }
         .settle-all-btn { background: rgba(99,102,241,0.12); border: 1px solid var(--primary); color: var(--primary-light); padding: 4px 14px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: 'Outfit', sans-serif; transition: 0.2s; }
         .settle-all-btn:hover { background: var(--primary); color: white; }
 
@@ -304,10 +304,15 @@
             .user-display { font-size:0.8rem; }
             .avatar-circle { width:28px; height:28px; font-size:0.75rem; }
 
-            /* [ISSUE 5] MOBILE DASHBOARD REORDERING */
+            /* MOBILE DASHBOARD REORDERING */
             #dashboard { display: flex; flex-direction: column; }
-            #dashboard .dashboard-grid { order: 2; margin-top: 1.5rem; }
-            #dashboard div[style*="grid-template-columns: 1fr 1fr"] { order: 1; }
+            #dashboard .dashboard-grid { order: 3; margin-top: 1rem; }
+            #dashboard > div:not(.dashboard-grid) { order: 1; }
+            /* Stack the 1fr 1fr grid to single column on mobile */
+            #dashboard div[style*="grid-template-columns: 1fr 1fr"],
+            #dashboard div[style*="grid-template-columns:1fr 1fr"] { 
+                grid-template-columns: 1fr !important; 
+            }
             
             /* [ISSUE 6] ANALYTICS VERTICAL STACKING */
             #analytics div[style*="display:grid"] { grid-template-columns: 1fr !important; }
@@ -463,7 +468,7 @@
                     <input type="number" id="ex-amt" placeholder="How much? (₹)">
                     <label style="font-size:0.8rem; color:var(--text-dim)">Paid By:</label>
                     <select id="ex-payer"></select>
-                    <label style="font-size:0.8rem; color:var(--text-dim)">Split Among:</label>
+                    <label style="font-size:0.8rem; color:var(--text-dim)">Split Equally Among:</label>
                     <div id="ex-parts" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 12px 0"></div>
                     <button class="btn btn-sm" onclick="openUnequalSplitModal()" style="margin-bottom:14px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); color:#fbbf24; width:100%; justify-content:center;"><i data-lucide="sliders-horizontal" style="width:14px;height:14px"></i> Split Unequally</button>
                     <button class="btn btn-primary" onclick="addEx()" style="width:100%">Record Expense</button>

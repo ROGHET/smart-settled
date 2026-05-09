@@ -683,12 +683,22 @@ async function loadEx() {
     renderExpenseList(expensesList);
 }
 
+// --- Determine logged-in user's member name in current group ---
+function getCurrentMemberName() {
+    if (!currentUser) return null;
+    const displayName = (currentUser.displayName || currentUser.email?.split('@')[0] || '').trim();
+    if (people.includes(displayName)) return displayName;
+    const lower = displayName.toLowerCase();
+    return people.find(p => p.toLowerCase() === lower) || null;
+}
+
 function renderExpenseList(list) {
     const container = document.getElementById('ex-history');
     if (!list.length) {
         container.innerHTML = '<p style="color:var(--text-dim); text-align:center; padding:2rem;">No expenses yet.</p>';
         return;
     }
+    const myName = getCurrentMemberName();
     container.innerHTML = list.map((e, idx) => {
         const date = e.createdAt?.toDate ? e.createdAt.toDate().toISOString().split('T')[0] : (e.date || '');
         const isFullySettled = e.settled === true;
@@ -697,30 +707,33 @@ function renderExpenseList(list) {
         const settledBy = e.settledBy || {};
         const customSplits = e.customSplits || {};
         const defaultSplit = parts.length ? e.amount / parts.length : 0;
+        const nonPayerParts = parts.filter(p => p !== e.payer);
 
-        // Build per-participant rows
-        let participantRows = '';
-        if (!isFullySettled && parts.length > 0) {
-            const nonPayerParts = parts.filter(p => p !== e.payer);
-            if (nonPayerParts.length > 0) {
-                participantRows = '<div class="participant-rows">' + nonPayerParts.map(p => {
-                    const split = customSplits[p] !== undefined ? customSplits[p] : defaultSplit;
-                    const isPersonSettled = settledBy[p] === true || split === 0;
-                    const safeId = String(e.id || idx).replace(/'/g, "\\'");
-                    const safeP = p.replace(/'/g, "\\'");
-                    if (isPersonSettled) {
-                        return `<div class="participant-row"><span class="p-name">${p}</span><span class="settled-badge-sm">✓ ₹${split.toFixed(2)} Settled</span></div>`;
-                    }
-                    return `<div class="participant-row"><span class="p-name">${p} — ₹${split.toFixed(2)}</span><button class="settle-expense-btn" onclick="settleExpensePerson('${safeId}','${safeP}')">Settle</button></div>`;
-                }).join('') + '</div>';
-
-                // Payer settle-all shortcut (if there are still unsettled people)
-                const hasUnsettled = nonPayerParts.some(p => !settledBy[p] && (customSplits[p] !== undefined ? customSplits[p] : defaultSplit) > 0);
-                if (hasUnsettled) {
-                    const safeId = String(e.id || idx).replace(/'/g, "\\'");
-                    const safePayer = e.payer.replace(/'/g, "\\'");
-                    participantRows += `<div class="settle-all-row"><button class="settle-all-btn" onclick="settleExpensePerson('${safeId}','${safePayer}')" title="Settle all outstanding (payer action)">Settle All</button></div>`;
+        // Participant status rows (read-only info)
+        let statusRows = '';
+        if (!isFullySettled && nonPayerParts.length > 0) {
+            statusRows = '<div class="participant-rows">' + nonPayerParts.map(p => {
+                const split = customSplits[p] !== undefined ? customSplits[p] : defaultSplit;
+                const isPersonSettled = settledBy[p] === true || split === 0;
+                if (isPersonSettled) {
+                    return `<div class="participant-row"><span class="p-name">${p}</span><span class="settled-badge-sm">\u2713 \u20b9${split.toFixed(2)} Settled</span></div>`;
                 }
+                return `<div class="participant-row"><span class="p-name">${p}</span><span style="color:var(--accent);font-size:0.75rem;">\u20b9${split.toFixed(2)} owes</span></div>`;
+            }).join('') + '</div>';
+        }
+
+        // Action buttons
+        let actionBtns = '';
+        if (!isFullySettled && nonPayerParts.length > 0) {
+            const safeId = String(e.id || idx).replace(/'/g, "\\'");
+            const safePayer = e.payer.replace(/'/g, "\\'");
+            const hasAnyUnsettled = nonPayerParts.some(p => !settledBy[p]);
+            if (hasAnyUnsettled) {
+                // Settle button — settles current user's share
+                const settleBtn = `<button class="settle-expense-btn" onclick="handleSettleButton('${safeId}','${safePayer}')">Settle</button>`;
+                // Settle All button — settles everyone (payer action)
+                const settleAllBtn = `<button class="settle-all-btn" onclick="settleExpensePerson('${safeId}','${safePayer}')">Settle All</button>`;
+                actionBtns = `<div class="settle-all-row">${settleBtn}${settleAllBtn}</div>`;
             }
         }
 
@@ -728,12 +741,29 @@ function renderExpenseList(list) {
             <div style="flex:1">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start">
                     <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
-                    <div style="text-align:right"><strong>₹${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
+                    <div style="text-align:right"><strong>\u20b9${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
                 </div>
-                ${participantRows}
+                ${statusRows}${actionBtns}
             </div>
         </div>`;
     }).join('');
+}
+
+// --- Smart Settle button: settles current user's share ---
+async function handleSettleButton(expId, payer) {
+    const myName = getCurrentMemberName();
+    if (!myName) {
+        // Guest mode or name not found — fall back to settle all
+        await settleExpensePerson(expId, payer);
+        return;
+    }
+    if (myName === payer) {
+        // Current user is payer — settle all outstanding
+        await settleExpensePerson(expId, payer);
+    } else {
+        // Settle only current user's share
+        await settleExpensePerson(expId, myName);
+    }
 }
 
 function filterExpenses() {
@@ -746,6 +776,8 @@ function filterExpenses() {
 }
 
 
+
+
 async function addEx() {
     const p = document.getElementById('ex-payer').value;
     const a = parseFloat(document.getElementById('ex-amt').value);
@@ -753,12 +785,11 @@ async function addEx() {
     const parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
     if (!a || !parts.length) return notify("Missing amount or split!", "error");
 
-    // Collect custom splits if set
     const cs = window._unequalSplits || {};
     const hasCustom = Object.keys(cs).length > 0;
     const expensePayload = { payer:p, amount:a, description:d, participants:parts };
     if (hasCustom) expensePayload.customSplits = { ...cs };
-    window._unequalSplits = {}; // reset
+    window._unequalSplits = {}; // always reset
 
     if (isGuestMode) {
         if (!guestData.expenses[curGrp]) guestData.expenses[curGrp] = [];
@@ -952,27 +983,25 @@ function computeStatus() {
     expensesList.forEach(e => {
         totalSpentAll += e.amount;
         if (e.payer in spendingPerMember) spendingPerMember[e.payer] += e.amount;
-
-        if (e.settled) return; // fully settled — skip entirely
-
+        if (e.settled) return; // fully settled (legacy flag) — skip
         const parts = e.participants || [];
         if (!parts.length) return;
-
-        const settledBy = e.settledBy || {};
+        totalSpent += e.amount;
         const customSplits = e.customSplits || {};
-        const defaultSplit = e.amount / parts.length;
-        let payerCredit = 0;
-
-        parts.forEach(p => {
-            if (settledBy[p] === true) return; // this person already settled
-            const personSplit = (customSplits[p] !== undefined) ? customSplits[p] : defaultSplit;
-            if (personSplit <= 0) return;
-            if (p in balances) balances[p] -= personSplit;
-            payerCredit += personSplit;
-        });
-
-        if (e.payer in balances) balances[e.payer] += payerCredit;
-        if (payerCredit > 0) totalSpent += payerCredit;
+        const hasCustom = Object.keys(customSplits).length > 0;
+        if (hasCustom) {
+            let totalCustom = 0;
+            parts.forEach(p => {
+                const ps = customSplits[p] !== undefined ? customSplits[p] : 0;
+                if (ps > 0 && p in balances) balances[p] -= ps;
+                totalCustom += ps;
+            });
+            if (e.payer in balances) balances[e.payer] += totalCustom;
+        } else {
+            const split = e.amount / parts.length;
+            parts.forEach(p => { if (p in balances) balances[p] -= split; });
+            if (e.payer in balances) balances[e.payer] += e.amount;
+        }
     });
     settlementsList.forEach(s => {
         if (s.payer in balances) balances[s.payer] += s.amount;
@@ -1496,10 +1525,17 @@ function getTotalSpentIncludingSettled() {
 window._unequalSplits = {};
 
 function openUnequalSplitModal() {
-    const parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
+    const descVal = document.getElementById('ex-desc').value.trim();
     const amount = parseFloat(document.getElementById('ex-amt').value) || 0;
-    if (!parts.length) { notify("Select participants first!", "error"); return; }
+    const payer = document.getElementById('ex-payer').value;
+    const allParts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
+    // Validate required fields
+    if (!descVal) { notify("Enter a description first!", "error"); return; }
     if (!amount) { notify("Enter the expense amount first!", "error"); return; }
+    if (!allParts.length) { notify("Select participants first!", "error"); return; }
+    // Show only non-payer participants (payer doesn't owe themselves)
+    const parts = allParts.filter(p => p !== payer);
+    if (!parts.length) { notify("Add other participants besides the payer!", "error"); return; }
 
     document.getElementById('unequal-total-amt').textContent = amount.toFixed(2);
     document.getElementById('unequal-remaining').textContent = amount.toFixed(2);
@@ -1562,6 +1598,7 @@ function confirmUnequalSplit() {
         window._unequalSplits[input.dataset.person] = val;
     });
     closeUnequalModal();
-    notify("Unequal split applied!", "success");
+    // Record expense immediately
+    addEx();
 }
 
