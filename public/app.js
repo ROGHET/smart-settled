@@ -680,35 +680,93 @@ async function loadEx() {
         snap.forEach(doc => expensesList.push({ id: doc.id, ...doc.data() }));
         expensesList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     }
+    renderExpenseList(expensesList);
+}
+
+function renderExpenseList(list) {
     const container = document.getElementById('ex-history');
-    container.innerHTML = expensesList.length ? expensesList.map((e, idx) => {
+    if (!list.length) {
+        container.innerHTML = '<p style="color:var(--text-dim); text-align:center; padding:2rem;">No expenses yet.</p>';
+        return;
+    }
+    container.innerHTML = list.map((e, idx) => {
         const date = e.createdAt?.toDate ? e.createdAt.toDate().toISOString().split('T')[0] : (e.date || '');
-        const isSettled = e.settled === true;
-        const settledClass = isSettled ? ' settled-expense' : '';
-        const settleBtn = isSettled ? '' : `<button class="settle-expense-btn" onclick="settleExpense(${idx})">Settle</button>`;
-        return `<div class="list-item${settledClass}">
-            <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
-            <div style="display:flex; align-items:center; gap:10px;">
-                <div style="text-align:right"><strong>₹${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
-                ${settleBtn}
+        const isFullySettled = e.settled === true;
+        const settledClass = isFullySettled ? ' settled-expense' : '';
+        const parts = e.participants || [];
+        const settledBy = e.settledBy || {};
+        const customSplits = e.customSplits || {};
+        const defaultSplit = parts.length ? e.amount / parts.length : 0;
+
+        // Build per-participant rows
+        let participantRows = '';
+        if (!isFullySettled && parts.length > 0) {
+            const nonPayerParts = parts.filter(p => p !== e.payer);
+            if (nonPayerParts.length > 0) {
+                participantRows = '<div class="participant-rows">' + nonPayerParts.map(p => {
+                    const split = customSplits[p] !== undefined ? customSplits[p] : defaultSplit;
+                    const isPersonSettled = settledBy[p] === true || split === 0;
+                    const safeId = String(e.id || idx).replace(/'/g, "\\'");
+                    const safeP = p.replace(/'/g, "\\'");
+                    if (isPersonSettled) {
+                        return `<div class="participant-row"><span class="p-name">${p}</span><span class="settled-badge-sm">✓ ₹${split.toFixed(2)} Settled</span></div>`;
+                    }
+                    return `<div class="participant-row"><span class="p-name">${p} — ₹${split.toFixed(2)}</span><button class="settle-expense-btn" onclick="settleExpensePerson('${safeId}','${safeP}')">Settle</button></div>`;
+                }).join('') + '</div>';
+
+                // Payer settle-all shortcut (if there are still unsettled people)
+                const hasUnsettled = nonPayerParts.some(p => !settledBy[p] && (customSplits[p] !== undefined ? customSplits[p] : defaultSplit) > 0);
+                if (hasUnsettled) {
+                    const safeId = String(e.id || idx).replace(/'/g, "\\'");
+                    const safePayer = e.payer.replace(/'/g, "\\'");
+                    participantRows += `<div class="settle-all-row"><button class="settle-all-btn" onclick="settleExpensePerson('${safeId}','${safePayer}')" title="Settle all outstanding (payer action)">Settle All</button></div>`;
+                }
+            }
+        }
+
+        return `<div class="list-item expense-card${settledClass}">
+            <div style="flex:1">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                    <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
+                    <div style="text-align:right"><strong>₹${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
+                </div>
+                ${participantRows}
             </div>
         </div>`;
-    }).join("") : '<p style="color:var(--text-dim); text-align:center; padding:2rem;">No expenses yet.</p>';
+    }).join('');
 }
+
+function filterExpenses() {
+    const q = (document.getElementById('ex-search')?.value || '').toLowerCase().trim();
+    if (!q) { renderExpenseList(expensesList); return; }
+    renderExpenseList(expensesList.filter(e =>
+        (e.description || '').toLowerCase().includes(q) ||
+        (e.payer || '').toLowerCase().includes(q)
+    ));
+}
+
 
 async function addEx() {
     const p = document.getElementById('ex-payer').value;
     const a = parseFloat(document.getElementById('ex-amt').value);
-    const d = document.getElementById('ex-desc').value;
+    const d = document.getElementById('ex-desc').value.trim();
     const parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
     if (!a || !parts.length) return notify("Missing amount or split!", "error");
+
+    // Collect custom splits if set
+    const cs = window._unequalSplits || {};
+    const hasCustom = Object.keys(cs).length > 0;
+    const expensePayload = { payer:p, amount:a, description:d, participants:parts };
+    if (hasCustom) expensePayload.customSplits = { ...cs };
+    window._unequalSplits = {}; // reset
+
     if (isGuestMode) {
         if (!guestData.expenses[curGrp]) guestData.expenses[curGrp] = [];
-        guestData.expenses[curGrp].push({ id: 'e'+(++guestIdCounter), payer:p, amount:a, description:d, participants:parts, date:new Date().toISOString().split('T')[0] });
+        guestData.expenses[curGrp].push({ id:'e'+(++guestIdCounter), ...expensePayload, date:new Date().toISOString().split('T')[0] });
     } else {
         await db.collection('expenses').add({
-            groupId: curGrp, userId: currentUser.uid, payer: p, amount: a,
-            description: d, participants: parts, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            groupId: curGrp, userId: currentUser.uid, ...expensePayload,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
     }
     document.getElementById('ex-amt').value = "";
@@ -746,8 +804,9 @@ function filterSettle() {
     if (filteredSettlements.length) {
         html += filteredSettlements.map(s => {
             const date = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleString() : '';
+            const noteStr = s.note ? ` <span style="color:var(--text-dim);font-size:0.75rem">for ${s.note}</span>` : '';
             return `<div class="list-item">
-                <div><strong>${s.payer} paid ${s.receiver}</strong><br><small style="color:var(--text-dim)">${date}</small></div>
+                <div><strong>${s.payer} paid ${s.receiver}</strong>${noteStr}<br><small style="color:var(--text-dim)">${date}</small></div>
                 <div style="color:var(--primary-light)">₹${s.amount}</div>
             </div>`;
         }).join("");
@@ -770,17 +829,94 @@ function filterSettle() {
     renderSettledExpenses();
 }
 
-async function settleNow(f, t, a) {
+// --- Helper: add a settlement record (without triggering full refresh) ---
+async function addSettlementRecord(from, to, amount, note) {
     if (isGuestMode) {
         if (!guestData.settlements[curGrp]) guestData.settlements[curGrp] = [];
-        guestData.settlements[curGrp].push({ id:'s'+(++guestIdCounter), payer:f, receiver:t, amount:a, date:new Date().toLocaleString() });
+        guestData.settlements[curGrp].push({ id:'s'+(++guestIdCounter), payer:from, receiver:to, amount, note: note||'', date:new Date().toLocaleString() });
     } else {
         await db.collection('settlements').add({
-            groupId: curGrp, userId: currentUser.uid, payer: f, receiver: t, amount: a,
+            groupId: curGrp, userId: currentUser.uid, payer: from, receiver: to, amount,
+            note: note || '',
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
     }
+}
+
+async function settleNow(f, t, a) {
+    await addSettlementRecord(f, t, a);
+    await bulkSettleExpensesByPair(f, t);
     notify("Payment Recorded!");
+    await refresh();
+}
+
+// --- Bulk-settle all expense relations between debtor and creditor ---
+async function bulkSettleExpensesByPair(debtor, creditor) {
+    const toUpdate = [];
+    for (const expense of expensesList) {
+        if (expense.settled) continue;
+        if (expense.payer !== creditor) continue;
+        const parts = expense.participants || [];
+        if (!parts.includes(debtor)) continue;
+        const settledBy = expense.settledBy || {};
+        if (settledBy[debtor]) continue;
+        const newSettledBy = { ...settledBy, [debtor]: true };
+        const nonPayerParts = parts.filter(p => p !== creditor);
+        const allSettled = nonPayerParts.every(p => newSettledBy[p]);
+        if (isGuestMode) {
+            expense.settledBy = newSettledBy;
+            if (allSettled) expense.settled = true;
+        } else {
+            const updateData = { settledBy: newSettledBy };
+            if (allSettled) updateData.settled = true;
+            toUpdate.push({ id: expense.id, data: updateData });
+        }
+    }
+    if (!isGuestMode && toUpdate.length > 0) {
+        const batch = db.batch();
+        toUpdate.forEach(({ id, data }) => batch.update(db.collection('expenses').doc(id), data));
+        await batch.commit();
+    }
+}
+
+// --- Per-user expense settlement ---
+async function settleExpensePerson(expId, personName) {
+    const expense = expensesList.find(e => e.id === String(expId));
+    if (!expense || expense.settled) return;
+    const parts = expense.participants || [];
+    const payer = expense.payer;
+    const settledBy = { ...(expense.settledBy || {}) };
+    const customSplits = expense.customSplits || {};
+    const defaultSplit = expense.amount / (parts.length || 1);
+
+    let peopleToSettle = [];
+    if (personName === payer) {
+        // Payer clicks: settle all outstanding participants
+        peopleToSettle = parts.filter(p => p !== payer && !settledBy[p]);
+    } else {
+        if (settledBy[personName]) { notify("Already settled!", "error"); return; }
+        peopleToSettle = [personName];
+    }
+    if (!peopleToSettle.length) { notify("Nothing to settle!", "error"); return; }
+
+    for (const person of peopleToSettle) {
+        const amt = customSplits[person] !== undefined ? customSplits[person] : defaultSplit;
+        settledBy[person] = true;
+        if (amt > 0) await addSettlementRecord(person, payer, amt, expense.description);
+    }
+
+    const nonPayerParts = parts.filter(p => p !== payer);
+    const allSettled = nonPayerParts.every(p => settledBy[p]);
+
+    if (isGuestMode) {
+        const guestExp = (guestData.expenses[curGrp] || []).find(e => e.id === String(expId));
+        if (guestExp) { guestExp.settledBy = settledBy; if (allSettled) guestExp.settled = true; }
+    } else {
+        const updateData = { settledBy };
+        if (allSettled) updateData.settled = true;
+        await db.collection('expenses').doc(String(expId)).update(updateData);
+    }
+    notify("Settled!");
     await refresh();
 }
 
@@ -816,15 +952,27 @@ function computeStatus() {
     expensesList.forEach(e => {
         totalSpentAll += e.amount;
         if (e.payer in spendingPerMember) spendingPerMember[e.payer] += e.amount;
-        
-        if (e.settled) return; // Skip settled expenses in balance calculations
-        totalSpent += e.amount;
+
+        if (e.settled) return; // fully settled — skip entirely
+
         const parts = e.participants || [];
-        if (parts.length) {
-            const split = e.amount / parts.length;
-            parts.forEach(p => { if (p in balances) balances[p] -= split; });
-            if (e.payer in balances) balances[e.payer] += e.amount;
-        }
+        if (!parts.length) return;
+
+        const settledBy = e.settledBy || {};
+        const customSplits = e.customSplits || {};
+        const defaultSplit = e.amount / parts.length;
+        let payerCredit = 0;
+
+        parts.forEach(p => {
+            if (settledBy[p] === true) return; // this person already settled
+            const personSplit = (customSplits[p] !== undefined) ? customSplits[p] : defaultSplit;
+            if (personSplit <= 0) return;
+            if (p in balances) balances[p] -= personSplit;
+            payerCredit += personSplit;
+        });
+
+        if (e.payer in balances) balances[e.payer] += payerCredit;
+        if (payerCredit > 0) totalSpent += payerCredit;
     });
     settlementsList.forEach(s => {
         if (s.payer in balances) balances[s.payer] += s.amount;
@@ -1077,20 +1225,29 @@ function renderSettledExpenses() {
     const container = document.getElementById('settled-expenses-list');
     if (!container) return;
     const settled = expensesList.filter(e => e.settled === true);
-    if (!settled.length) {
+    const partial = expensesList.filter(e => !e.settled && e.settledBy && Object.keys(e.settledBy).length > 0);
+    const all = [...settled, ...partial];
+    if (!all.length) {
         container.innerHTML = '<p style="color:var(--text-dim); text-align:center; padding:1.5rem;">No settled expenses yet.</p>';
         return;
     }
-    container.innerHTML = settled.map(e => {
+    container.innerHTML = all.map(e => {
+        const isFull = e.settled === true;
         const date = e.settledAt
             ? (typeof e.settledAt === 'string' ? new Date(e.settledAt).toLocaleDateString() : (e.settledAt.toDate ? e.settledAt.toDate().toLocaleDateString() : ''))
             : (e.createdAt?.toDate ? e.createdAt.toDate().toLocaleDateString() : (e.date || ''));
-        return `<div class="list-item" style="opacity:0.7;">
-            <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
-            <div style="text-align:right"><strong style="color:#10b981">₹${e.amount}</strong><br><small style="font-size:0.65rem; color:#10b981">Settled ${date}</small></div>
+        const badge = isFull
+            ? `<span style="background:rgba(16,185,129,0.2);color:#10b981;font-size:0.65rem;padding:2px 7px;border-radius:5px;">SETTLED</span>`
+            : `<span style="background:rgba(245,158,11,0.2);color:#f59e0b;font-size:0.65rem;padding:2px 7px;border-radius:5px;">PARTIAL</span>`;
+        const settledNames = Object.keys(e.settledBy || {}).join(', ');
+        return `<div class="list-item" style="opacity:${isFull ? '0.7' : '0.9'};">
+            <div><strong>${e.description || 'Exp'}</strong> ${badge}<br>
+            <small style="color:var(--text-dim)">Paid by ${e.payer}${settledNames ? ' \xb7 Settled: ' + settledNames : ''}</small></div>
+            <div style="text-align:right"><strong style="color:#10b981">\u20b9${e.amount}</strong><br><small style="font-size:0.65rem; color:var(--text-dim)">${date}</small></div>
         </div>`;
-    }).join("");
+    }).join('');
 }
+
 
 // --- FIX 4: Group Edit Name ---
 async function editGrpName(groupId, oldName) {
@@ -1152,6 +1309,7 @@ function generateInviteLink() {
 }
 
 function shareGroup(type) {
+    if (isGuestMode) { notify("Please log in to share groups.", "error"); return; }
     if (!curGrp) { notify("Select a group first!", "error"); return; }
     
     let textToCopy = "";
@@ -1164,7 +1322,7 @@ function shareGroup(type) {
         textToCopy = curGrp;
         successMsg = "Group ID copied to clipboard!";
     } else {
-        return; // Modal should handle the type now
+        return;
     }
     
     if (!textToCopy) return;
@@ -1182,13 +1340,12 @@ function shareGroup(type) {
 }
 
 async function joinGrpById() {
-    if (isGuestMode) {
-        notify("Cannot join shared groups in guest mode.", "error");
-        return;
-    }
-    const groupId = prompt("Enter Group ID to join:");
-    if (!groupId || !groupId.trim()) return;
-    await processGroupJoin(groupId.trim());
+    if (isGuestMode) { notify("Cannot join shared groups in guest mode.", "error"); return; }
+    const el = document.getElementById('new-grp-name');
+    const groupId = el ? el.value.trim() : '';
+    if (!groupId) { notify("Enter a group code first", "error"); return; }
+    if (el) el.value = '';
+    await processGroupJoin(groupId);
 }
 
 async function processGroupJoin(sharedGroupId) {
@@ -1334,3 +1491,77 @@ window.addEventListener("load", () => {
 function getTotalSpentIncludingSettled() {
     return expensesList.reduce((sum, e) => sum + e.amount, 0);
 }
+
+// ========== UNEQUAL SPLIT ==========
+window._unequalSplits = {};
+
+function openUnequalSplitModal() {
+    const parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
+    const amount = parseFloat(document.getElementById('ex-amt').value) || 0;
+    if (!parts.length) { notify("Select participants first!", "error"); return; }
+    if (!amount) { notify("Enter the expense amount first!", "error"); return; }
+
+    document.getElementById('unequal-total-amt').textContent = amount.toFixed(2);
+    document.getElementById('unequal-remaining').textContent = amount.toFixed(2);
+    document.getElementById('unequal-remaining').style.color = 'var(--text-main)';
+
+    const rowsEl = document.getElementById('unequal-rows');
+    rowsEl.innerHTML = parts.map(p => `
+        <div class="unequal-row">
+            <label class="unequal-label">${p}</label>
+            <input type="number" class="unequal-input" data-person="${p}" placeholder="0.00" min="0" step="0.01" oninput="updateUnequalRemaining()">
+        </div>`).join('');
+
+    const confirmBtn = document.getElementById('unequal-confirm');
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.45';
+    document.getElementById('unequal-modal').style.display = 'flex';
+    if (window.lucide) lucide.createIcons();
+}
+
+function updateUnequalRemaining() {
+    const amount = parseFloat(document.getElementById('ex-amt').value) || 0;
+    let entered = 0;
+    document.querySelectorAll('.unequal-input').forEach(input => {
+        entered += parseFloat(input.value) || 0;
+    });
+    const remaining = Math.round((amount - entered) * 100) / 100;
+    const remEl = document.getElementById('unequal-remaining');
+    const confirmBtn = document.getElementById('unequal-confirm');
+    const warningEl = document.getElementById('unequal-warning');
+
+    if (remaining < -0.009) {
+        remEl.textContent = Math.abs(remaining).toFixed(2);
+        remEl.style.color = '#ef4444';
+        if (warningEl) { warningEl.textContent = '⚠ Exceeded total amount'; warningEl.style.display = 'block'; }
+        confirmBtn.disabled = true;
+        confirmBtn.style.opacity = '0.45';
+    } else if (Math.abs(remaining) < 0.01) {
+        remEl.textContent = '0.00';
+        remEl.style.color = '#10b981';
+        if (warningEl) warningEl.style.display = 'none';
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '1';
+    } else {
+        remEl.textContent = remaining.toFixed(2);
+        remEl.style.color = 'var(--text-main)';
+        if (warningEl) warningEl.style.display = 'none';
+        confirmBtn.disabled = true;
+        confirmBtn.style.opacity = '0.45';
+    }
+}
+
+function closeUnequalModal() {
+    document.getElementById('unequal-modal').style.display = 'none';
+}
+
+function confirmUnequalSplit() {
+    window._unequalSplits = {};
+    document.querySelectorAll('.unequal-input').forEach(input => {
+        const val = parseFloat(input.value) || 0;
+        window._unequalSplits[input.dataset.person] = val;
+    });
+    closeUnequalModal();
+    notify("Unequal split applied!", "success");
+}
+
