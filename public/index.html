@@ -241,6 +241,9 @@
         .member-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .edit-member-btn { background: transparent; border: none; cursor: pointer; opacity: 0.6; transition: 0.2s ease; display: flex; align-items: center; justify-content: center; padding: 4px; }
         .edit-member-btn:hover { opacity: 1; transform: scale(1.1); }
+        .remove-member-btn { color: var(--text-main); }
+        .remove-member-btn:hover { color: #ef4444 !important; opacity: 1; }
+        .remove-member-btn i { color: inherit; }
         .mobile-add-btn { display: none; width: 100%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 600; margin-bottom: 1rem; cursor: pointer; font-family: 'Outfit', sans-serif; transition: 0.2s; }
         .mobile-add-btn:hover { opacity: 0.9; }
         .group-close-btn { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.1); color: white; border: none; border-radius: 8px; padding: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; }
@@ -266,9 +269,10 @@
         .grp-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .grp-item-name { flex: 1; cursor: pointer; padding: 8px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .grp-item-name:hover { color: var(--primary-light); }
-        .grp-action-btn { background: transparent; border: none; cursor: pointer; opacity: 0.5; transition: 0.2s; display: flex; align-items: center; justify-content: center; padding: 4px; }
+        .grp-action-btn { background: transparent; border: none; cursor: pointer; opacity: 0.6; transition: 0.2s; display: flex; align-items: center; justify-content: center; padding: 4px; color: var(--text-main); }
         .grp-action-btn:hover { opacity: 1; transform: scale(1.15); }
-        .grp-action-btn.delete:hover { color: #ef4444; }
+        .grp-action-btn.delete { color: var(--text-main); }
+        .grp-action-btn.delete:hover { color: #ef4444; opacity: 1; }
 
         /* --- Share Link Box --- */
         .share-box { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
@@ -470,8 +474,8 @@
                     <select id="ex-payer"></select>
                     <label style="font-size:0.8rem; color:var(--text-dim)">Split Equally Among:</label>
                     <div id="ex-parts" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 12px 0"></div>
-                    <button class="btn btn-sm" onclick="openUnequalSplitModal()" style="margin-bottom:14px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); color:#fbbf24; width:100%; justify-content:center;"><i data-lucide="sliders-horizontal" style="width:14px;height:14px"></i> Split Unequally</button>
                     <button class="btn btn-primary" onclick="addEx()" style="width:100%">Record Expense</button>
+                    <button class="btn btn-sm" onclick="openUnequalSplitModal()" style="margin-top:10px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); color:#fbbf24; width:100%; justify-content:center;"><i data-lucide="sliders-horizontal" style="width:14px;height:14px"></i> Split Unequally</button>
                 </div>
                 <div class="card">
                     <div class="card-header" style="justify-content:space-between">

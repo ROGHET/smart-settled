@@ -569,6 +569,9 @@ async function loadPpl() {
                 <button class="edit-member-btn" title="Edit name" onclick="editMemberName('${safeName}')">
                     <i data-lucide="pencil" style="width:16px;height:16px;color:var(--text-main);"></i>
                 </button>
+                <button class="edit-member-btn remove-member-btn" title="Remove member" onclick="removeMember('${safeName}')">
+                    <i data-lucide="trash-2" style="width:16px;height:16px;"></i>
+                </button>
             </div>`;
         }).join("") :
         '<p style="color:var(--text-dim); font-size:0.85rem; padding:10px; text-align:center;">No members yet.</p>';
@@ -656,6 +659,22 @@ async function editMemberName(oldName) {
     await refresh();
 }
 
+async function removeMember(name) {
+    if (!confirm(`Remove "${name}" from the group?`)) return;
+    if (isGuestMode) {
+        guestData.members[curGrp] = (guestData.members[curGrp] || []).filter(m => m !== name);
+    } else {
+        const snap = await db.collection('members')
+            .where('groupId', '==', curGrp)
+            .where('name', '==', name).get();
+        const batch = db.batch();
+        snap.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+    }
+    notify(`${name} removed`, 'error');
+    await refresh();
+}
+
 function addMemberPrompt() {
     // Mobile: focus the input field so keyboard opens
     const el = document.getElementById('member-search');
@@ -698,7 +717,6 @@ function renderExpenseList(list) {
         container.innerHTML = '<p style="color:var(--text-dim); text-align:center; padding:2rem;">No expenses yet.</p>';
         return;
     }
-    const myName = getCurrentMemberName();
     container.innerHTML = list.map((e, idx) => {
         const date = e.createdAt?.toDate ? e.createdAt.toDate().toISOString().split('T')[0] : (e.date || '');
         const isFullySettled = e.settled === true;
@@ -711,29 +729,27 @@ function renderExpenseList(list) {
 
         // Participant status rows (read-only info)
         let statusRows = '';
-        if (!isFullySettled && nonPayerParts.length > 0) {
+        if (nonPayerParts.length > 0) {
             statusRows = '<div class="participant-rows">' + nonPayerParts.map(p => {
                 const split = customSplits[p] !== undefined ? customSplits[p] : defaultSplit;
                 const isPersonSettled = settledBy[p] === true || split === 0;
                 if (isPersonSettled) {
                     return `<div class="participant-row"><span class="p-name">${p}</span><span class="settled-badge-sm">\u2713 \u20b9${split.toFixed(2)} Settled</span></div>`;
                 }
-                return `<div class="participant-row"><span class="p-name">${p}</span><span style="color:var(--accent);font-size:0.75rem;">\u20b9${split.toFixed(2)} owes</span></div>`;
+                return `<div class="participant-row"><span class="p-name">${p}</span><span style="color:var(--accent);font-size:0.75rem;">owes \u20b9${split.toFixed(2)}</span></div>`;
             }).join('') + '</div>';
         }
 
-        // Action buttons
-        let actionBtns = '';
+        // Single settle button
+        let settleBtn = '';
         if (!isFullySettled && nonPayerParts.length > 0) {
             const safeId = String(e.id || idx).replace(/'/g, "\\'");
-            const safePayer = e.payer.replace(/'/g, "\\'");
-            const hasAnyUnsettled = nonPayerParts.some(p => !settledBy[p]);
-            if (hasAnyUnsettled) {
-                // Settle button — settles current user's share
-                const settleBtn = `<button class="settle-expense-btn" onclick="handleSettleButton('${safeId}','${safePayer}')">Settle</button>`;
-                // Settle All button — settles everyone (payer action)
-                const settleAllBtn = `<button class="settle-all-btn" onclick="settleExpensePerson('${safeId}','${safePayer}')">Settle All</button>`;
-                actionBtns = `<div class="settle-all-row">${settleBtn}${settleAllBtn}</div>`;
+            // Grey out if all participants already settled via dashboard (settledBy)
+            const allDashboardSettled = nonPayerParts.length > 0 && nonPayerParts.every(p => settledBy[p] === true);
+            if (allDashboardSettled) {
+                settleBtn = `<div class="settle-all-row"><button class="settle-expense-btn" disabled style="opacity:0.35;cursor:not-allowed;border-color:var(--text-dim);color:var(--text-dim);">Settled</button></div>`;
+            } else {
+                settleBtn = `<div class="settle-all-row"><button class="settle-expense-btn" onclick="settleExpense('${safeId}')">Settle</button></div>`;
             }
         }
 
@@ -743,28 +759,13 @@ function renderExpenseList(list) {
                     <div><strong>${e.description || 'Exp'}</strong><br><small style="color:var(--text-dim)">Paid by ${e.payer}</small></div>
                     <div style="text-align:right"><strong>\u20b9${e.amount}</strong><br><small style="font-size:0.7rem">${date}</small></div>
                 </div>
-                ${statusRows}${actionBtns}
+                ${statusRows}${settleBtn}
             </div>
         </div>`;
     }).join('');
 }
 
-// --- Smart Settle button: settles current user's share ---
-async function handleSettleButton(expId, payer) {
-    const myName = getCurrentMemberName();
-    if (!myName) {
-        // Guest mode or name not found — fall back to settle all
-        await settleExpensePerson(expId, payer);
-        return;
-    }
-    if (myName === payer) {
-        // Current user is payer — settle all outstanding
-        await settleExpensePerson(expId, payer);
-    } else {
-        // Settle only current user's share
-        await settleExpensePerson(expId, myName);
-    }
-}
+
 
 function filterExpenses() {
     const q = (document.getElementById('ex-search')?.value || '').toLowerCase().trim();
@@ -1054,7 +1055,7 @@ function renderGraph(links) {
         .force("x", d3.forceX(w / 2).strength(0.05))
         .force("y", d3.forceY(h / 2).strength(0.05));
     svg.append("defs").append("marker").attr("id", "arr").attr("viewBox", "0 -5 10 10").attr("refX", 25).attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#6366f1");
-    const link = svg.selectAll("line").data(edges).join("line").attr("stroke", "rgba(99,102,241,0.3)").attr("stroke-width", d => Math.sqrt(d.val) / 2 + 1).attr("marker-end", "url(#arr)");
+    const link = svg.selectAll("line").data(edges).join("line").attr("stroke", "rgba(99,102,241,0.4)").attr("stroke-width", 2).attr("marker-end", "url(#arr)");
     const node = svg.selectAll("g").data(nodes).join("g").call(d3.drag()
         .on("start", e => { if (!e.active) sim.alphaTarget(0.3).restart(); e.subject.fx = e.x; e.subject.fy = e.y; })
         .on("drag", e => { e.subject.fx = e.x; e.subject.fy = e.y; })
@@ -1225,27 +1226,21 @@ async function expUser() {
 
 // ========== NEW FEATURES ==========
 
-// --- FIX 6: Per-Expense Settlement ---
-async function settleExpense(index) {
-    const expense = expensesList[index];
+// --- Per-Expense Settlement (settles entire transaction) ---
+async function settleExpense(expId) {
+    const expense = expensesList.find(e => e.id === String(expId));
     if (!expense || expense.settled) return;
 
     if (isGuestMode) {
-        const guestExpenses = guestData.expenses[curGrp];
-        if (guestExpenses && guestExpenses[index]) {
-            guestExpenses[index].settled = true;
-            guestExpenses[index].settledAt = new Date().toISOString();
-        }
+        const guestExp = (guestData.expenses[curGrp] || []).find(e => e.id === String(expId));
+        if (guestExp) { guestExp.settled = true; guestExp.settledAt = new Date().toISOString(); }
     } else {
-        // Update Firestore document
-        if (expense.id) {
-            await db.collection('expenses').doc(expense.id).update({
-                settled: true,
-                settledAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-        }
+        await db.collection('expenses').doc(String(expId)).update({
+            settled: true,
+            settledAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
     }
-    notify("Expense settled!");
+    notify('Expense settled!');
     await refresh();
 }
 
