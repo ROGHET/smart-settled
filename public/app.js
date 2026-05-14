@@ -274,29 +274,37 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const container = document.getElementById("app-container");
     if (container) {
+        let isTicking = false;
         container.addEventListener("mousemove", (e) => {
-            const x = e.clientX;
-            const y = e.clientY;
-
-            container.style.background = `
-                radial-gradient(circle at ${x}px ${y}px, 
-                rgba(99,102,241,0.15), 
-                transparent 40%)
-            `;
+            if (window.innerWidth <= 768) {
+                container.style.background = '';
+                return;
+            }
+            if (!isTicking) {
+                window.requestAnimationFrame(() => {
+                    container.style.background = `radial-gradient(circle at ${e.clientX}px ${e.clientY}px, rgba(99,102,241,0.15), transparent 40%)`;
+                    isTicking = false;
+                });
+                isTicking = true;
+            }
         });
     }
 
     const hubScreen = document.getElementById("group-hub-screen");
     if (hubScreen) {
+        let isTicking = false;
         hubScreen.addEventListener("mousemove", (e) => {
-            const x = e.clientX;
-            const y = e.clientY;
-
-            hubScreen.style.background = `
-                radial-gradient(circle at ${x}px ${y}px, 
-                rgba(99,102,241,0.15), 
-                var(--bg-dark) 40%)
-            `;
+            if (window.innerWidth <= 768) {
+                hubScreen.style.background = '';
+                return;
+            }
+            if (!isTicking) {
+                window.requestAnimationFrame(() => {
+                    hubScreen.style.background = `radial-gradient(circle at ${e.clientX}px ${e.clientY}px, rgba(99,102,241,0.15), var(--bg-dark) 40%)`;
+                    isTicking = false;
+                });
+                isTicking = true;
+            }
         });
     }
 
@@ -915,8 +923,9 @@ async function editMemberName(oldName) {
     if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
     
     const finalName = newName.trim();
-    if (people.includes(finalName)) {
-        alert("Member name already exists!");
+    const lower = finalName.toLowerCase();
+    if (people.map(p => p.toLowerCase()).includes(lower)) {
+        notify("Member name already exists. Please choose a different name.", "error");
         return;
     }
     
@@ -1345,39 +1354,77 @@ function computeStatus() {
     const balances = {};
     const spendingPerMember = {}; // Track actual spending for "Share" chart
     people.forEach(n => { balances[n] = 0.0; spendingPerMember[n] = 0.0; });
+    
+    // Feature: Canonical Name Mapping to heal ghost data and mismatched cases
+    const canonicalMap = {};
+    function getCanonical(rawName) {
+        if (!rawName) return 'Unknown';
+        const trimmed = rawName.trim();
+        if (canonicalMap[rawName]) return canonicalMap[rawName];
+        
+        // 1. Exact match
+        if (people.includes(trimmed)) {
+            canonicalMap[rawName] = trimmed;
+            return trimmed;
+        }
+        
+        // 2. Case-insensitive match against people
+        const lower = trimmed.toLowerCase();
+        const match = people.find(p => p.toLowerCase() === lower);
+        if (match) {
+            canonicalMap[rawName] = match;
+            return match;
+        }
+        
+        // 3. No match found, use trimmed as the new canonical name
+        canonicalMap[rawName] = trimmed;
+        // Add to balances so math doesn't leak!
+        if (balances[trimmed] === undefined) {
+            balances[trimmed] = 0.0;
+            spendingPerMember[trimmed] = 0.0;
+        }
+        return trimmed;
+    }
+
     let totalSpent = 0;
     let totalSpentAll = 0; // Includes settled for dashboard display
     expensesList.forEach(e => {
         totalSpentAll += e.amount;
-        if (e.payer in spendingPerMember) spendingPerMember[e.payer] += e.amount;
+        const canonicalPayer = getCanonical(e.payer);
+        if (canonicalPayer in spendingPerMember) spendingPerMember[canonicalPayer] += e.amount;
         
-        // Legacy settled flag: if settled and no settledBy map, it means it was settled 
-        // without settlement records. We must skip it so debt disappears.
-        // If it has settledBy, it has corresponding settlement records, so we process it.
+        // Legacy settled flag logic
         if (e.settled && (!e.settledBy || Object.keys(e.settledBy).length === 0)) return; 
 
         const parts = e.participants || [];
         if (!parts.length) return;
         totalSpent += e.amount;
+        
+        const canonicalParts = parts.map(getCanonical);
         const customSplits = e.customSplits || {};
         const hasCustom = Object.keys(customSplits).length > 0;
+        
         if (hasCustom) {
             let totalCustom = 0;
-            parts.forEach(p => {
-                const ps = customSplits[p] !== undefined ? customSplits[p] : 0;
-                if (ps > 0 && p in balances) balances[p] -= ps;
+            parts.forEach(rawP => {
+                const p = getCanonical(rawP);
+                const ps = customSplits[rawP] !== undefined ? customSplits[rawP] : 0;
+                if (ps > 0) balances[p] -= ps;
                 totalCustom += ps;
             });
-            if (e.payer in balances) balances[e.payer] += totalCustom;
+            balances[canonicalPayer] += totalCustom;
         } else {
             const split = e.amount / parts.length;
-            parts.forEach(p => { if (p in balances) balances[p] -= split; });
-            if (e.payer in balances) balances[e.payer] += e.amount;
+            canonicalParts.forEach(p => { balances[p] -= split; });
+            balances[canonicalPayer] += e.amount;
         }
     });
+    
     settlementsList.forEach(s => {
-        if (s.payer in balances) balances[s.payer] += s.amount;
-        if (s.receiver in balances) balances[s.receiver] -= s.amount;
+        const canonicalPayer = getCanonical(s.payer);
+        const canonicalReceiver = getCanonical(s.receiver);
+        balances[canonicalPayer] += s.amount;
+        balances[canonicalReceiver] -= s.amount;
     });
     let highSpender = '-', mostOwed = '-', maxB = 0.01, minB = -0.01;
     for (const [name, bal] of Object.entries(balances)) {
@@ -1993,14 +2040,14 @@ function renderUsersTab() {
         }
         
         return `<div class="list-item">
-            <div style="display:flex; align-items:center; gap:12px; flex:1;">
-                <div class="avatar-circle" style="width:36px; height:36px; font-size:1rem;">${displayName.charAt(0).toUpperCase()}</div>
-                <div>
+            <div style="display:flex; align-items:center; gap:12px; flex:1; overflow:hidden;">
+                <div class="avatar-circle" style="width:36px; height:36px; font-size:1rem; flex-shrink:0;">${displayName.charAt(0).toUpperCase()}</div>
+                <div style="overflow:hidden;">
                     <strong>${displayName}</strong>${badges}<br>
-                    <small style="color:var(--text-dim)">${info.email}</small>
+                    <small style="color:var(--text-dim); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${info.email}</small>
                 </div>
             </div>
-            <div style="display:flex; align-items:center; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
                 ${actionButtons}
             </div>
         </div>`;
@@ -2217,8 +2264,9 @@ function sendPaymentReminder(uid, displayName, email, amount) {
     if (isRemind) {
         subject = encodeURIComponent(`Payment Reminder: SmartSettled - ${groupName}`);
         body = encodeURIComponent(
-            `Hi ${displayName},\n\n` +
-            `This is a friendly reminder that you have an outstanding balance of ₹${amount} in the group "${groupName}".\n\n` +
+            `Hey ${displayName},\n\n` +
+            `You owe me ₹${amount}.\n` +
+            `Please try to pay me back as soon as possible.\n\n` +
             `You can view the details and settle up here:\n${link}\n\n` +
             `Thanks,\nSmartSettled`
         );
