@@ -108,8 +108,10 @@
         }
         .btn { padding: 10px 20px; border-radius: 10px; border: none; cursor: pointer; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; transition: 0.2s; }
         .btn-primary { background: var(--primary); color: white; }
+        .btn-outline { background: transparent; border: 1px solid var(--primary); color: var(--primary-light); }
         .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
         .btn:hover { transform: translateY(-1px); opacity: 0.9; }
+        .btn-outline:hover { background: rgba(99, 102, 241, 0.1); border-color: var(--primary-light); }
 
         #graph-container { width: 100%; height: 500px; background: rgba(0,0,0,0.2); border-radius: 20px; border: 1px solid var(--glass-border); }
 
@@ -258,10 +260,23 @@
             z-index: 10002;
         }
         @media (max-width: 768px) {
+            #auth-screen { 
+                position: relative; 
+                height: auto; 
+                min-height: 100vh; 
+                display: flex; 
+                flex-direction: column; 
+                padding: 3rem 1rem;
+                overflow-y: auto;
+            }
             .corner-social-icons {
-                bottom: 20px;
-                left: 50%;
-                transform: translateX(-50%);
+                position: relative;
+                bottom: auto;
+                left: auto;
+                transform: none;
+                margin-top: 2.5rem;
+                justify-content: center;
+                width: 100%;
             }
         }
         .group-close-btn:hover { background: rgba(255,255,255,0.2); }
@@ -459,7 +474,14 @@
         .hub-card-actions button:hover { border-color: var(--primary); color: var(--primary-light); }
         .hub-empty { text-align: center; color: var(--text-dim); padding: 3rem 1rem; font-size: 0.95rem; }
         @media (max-width:768px) {
-            #group-hub-screen { padding: 1rem; }
+            #group-hub-screen { 
+                padding: 2rem 1rem; 
+                display: flex; 
+                flex-direction: column;
+                height: auto;
+                min-height: 100vh;
+                position: relative;
+            }
             .hub-grid { grid-template-columns: 1fr; }
             .hub-actions { flex-direction: column; align-items: stretch; }
             .hub-actions input { max-width: 100%; }
@@ -742,10 +764,10 @@
             <button class="group-close-btn" onclick="collapseGroup()">✕</button>
             <div id="grp-list"></div>
             <div style="display:flex; gap:8px; margin:10px 0;">
-                <input type="text" id="new-grp-name" placeholder="Group name or ID..." style="margin:0; flex:1;" onkeypress="if(event.key==='Enter') joinGrpById()">
+                <input type="text" id="new-grp-name" placeholder="Group name or ID..." style="margin:0; flex:1;" onkeypress="if(event.key==='Enter') addGrp()">
                 <button class="btn btn-primary btn-sm" onclick="addGrp()" title="Create Group" style="padding:0 12px;"><i data-lucide="plus" style="width:16px;height:16px"></i></button>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="joinGrpById()" style="width:100%">Join</button>
+            <button class="btn btn-outline btn-sm" onclick="joinGrpById()" style="width:100%">Join</button>
         </div>
 
         <!-- Unequal Split Modal -->
@@ -778,7 +800,7 @@
             <div class="hub-actions">
                 <input type="text" id="hub-group-input" placeholder="Group name or code..." style="flex:1;" onkeypress="if(event.key==='Enter') hubCreateOrJoin()">
                 <button class="btn btn-primary" onclick="hubCreateGroup()" style="white-space:nowrap;"><i data-lucide="plus" style="width:14px;height:14px"></i> Create</button>
-                <button class="btn btn-primary" onclick="hubJoinGroup()" style="white-space:nowrap;"><i data-lucide="log-in" style="width:14px;height:14px"></i> Join</button>
+                <button class="btn btn-outline" onclick="hubJoinGroup()" style="white-space:nowrap;"><i data-lucide="log-in" style="width:14px;height:14px"></i> Join</button>
             </div>
             <div id="hub-grid" class="hub-grid"></div>
             <button class="btn btn-logout" onclick="logout()" style="width:100%; justify-content:center; margin-top:1.5rem;"><i data-lucide="log-out" style="width:14px;height:14px"></i> Sign Out</button>
