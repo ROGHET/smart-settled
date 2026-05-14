@@ -96,6 +96,12 @@ function changeUsername() {
     const newName = prompt("Enter new username:");
 
     if (!newName || !newName.trim()) return;
+    
+    const finalName = newName.trim();
+    if (typeof people !== 'undefined' && people.map(p => p.toLowerCase()).includes(finalName.toLowerCase())) {
+        notify("Username already taken by a member in this group.", "error");
+        return;
+    }
 
     const user = auth.currentUser;
 
@@ -275,14 +281,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const container = document.getElementById("app-container");
     if (container) {
         let isTicking = false;
+        container.style.backgroundImage = `radial-gradient(circle at var(--mouse-x, 50vw) var(--mouse-y, 50vh), rgba(99,102,241,0.08), transparent 25%)`;
         container.addEventListener("mousemove", (e) => {
             if (window.innerWidth <= 768) {
-                container.style.background = '';
+                container.style.backgroundImage = '';
                 return;
+            }
+            if (!container.style.backgroundImage) {
+                container.style.backgroundImage = `radial-gradient(circle at var(--mouse-x, 50vw) var(--mouse-y, 50vh), rgba(99,102,241,0.08), transparent 25%)`;
             }
             if (!isTicking) {
                 window.requestAnimationFrame(() => {
-                    container.style.background = `radial-gradient(circle at ${e.clientX}px ${e.clientY}px, rgba(99,102,241,0.15), transparent 40%)`;
+                    container.style.setProperty('--mouse-x', `${e.clientX}px`);
+                    container.style.setProperty('--mouse-y', `${e.clientY}px`);
                     isTicking = false;
                 });
                 isTicking = true;
@@ -293,14 +304,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const hubScreen = document.getElementById("group-hub-screen");
     if (hubScreen) {
         let isTicking = false;
+        hubScreen.style.backgroundImage = `radial-gradient(circle at var(--mouse-x, 50vw) var(--mouse-y, 50vh), rgba(99,102,241,0.08), var(--bg-dark) 25%)`;
         hubScreen.addEventListener("mousemove", (e) => {
             if (window.innerWidth <= 768) {
-                hubScreen.style.background = '';
+                hubScreen.style.backgroundImage = '';
                 return;
+            }
+            if (!hubScreen.style.backgroundImage) {
+                hubScreen.style.backgroundImage = `radial-gradient(circle at var(--mouse-x, 50vw) var(--mouse-y, 50vh), rgba(99,102,241,0.08), var(--bg-dark) 25%)`;
             }
             if (!isTicking) {
                 window.requestAnimationFrame(() => {
-                    hubScreen.style.background = `radial-gradient(circle at ${e.clientX}px ${e.clientY}px, rgba(99,102,241,0.15), var(--bg-dark) 40%)`;
+                    hubScreen.style.setProperty('--mouse-x', `${e.clientX}px`);
+                    hubScreen.style.setProperty('--mouse-y', `${e.clientY}px`);
                     isTicking = false;
                 });
                 isTicking = true;
@@ -2343,11 +2359,22 @@ async function submitBugReport() {
         return;
     }
     
+    const userEmail = currentUser ? currentUser.email : 'No email (Guest)';
+    const userName = currentUser ? (currentUser.displayName || currentUser.email.split('@')[0]) : 'Guest User';
+
     const contextInfo = {
         groupId: curGrp || 'None',
+        groupName: document.getElementById('group-title')?.innerText || 'Unknown',
         userId: currentUser ? currentUser.uid : 'Guest',
+        userEmail: userEmail,
+        userName: userName,
         isGuestMode: isGuestMode,
-        userAgent: navigator.userAgent
+        userAgent: navigator.userAgent,
+        appState: {
+            currentSection: document.querySelector('.nav-item.active')?.dataset.section || 'Unknown',
+            totalMembers: window._memberData ? window._memberData.length : 0,
+            totalExpenses: typeof expensesList !== 'undefined' ? expensesList.length : 0
+        }
     };
     
     try {
