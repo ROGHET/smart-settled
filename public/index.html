@@ -19,6 +19,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-analytics-compat.js"></script>
 
     <!-- jsPDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -762,6 +763,7 @@
             <div id="bug-error" style="color:#ef4444; font-size:0.82rem; margin-bottom:8px; display:none;"></div>
             <div style="display:flex; gap:10px;">
                 <button class="btn btn-primary" onclick="submitBugReport()" style="flex:1; justify-content:center;">Send Report</button>
+                <button class="btn" onclick="submitBugReportEmail()" style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.4); color:#f59e0b; flex:1; justify-content:center;"><i data-lucide="mail" style="width:14px;height:14px"></i> Email</button>
                 <button class="btn" onclick="closeBugReport()" style="background:rgba(255,255,255,0.08); border:1px solid var(--glass-border); color:var(--text-main); flex:0.5; justify-content:center;">Cancel</button>
             </div>
         </div>

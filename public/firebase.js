@@ -22,6 +22,22 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
+// Initialize Analytics
+let analytics;
+try {
+    analytics = firebase.analytics();
+} catch (e) {
+    console.warn("Analytics failed to initialize", e);
+}
+
+window.logAnalyticsEvent = function(eventName, params = {}) {
+    if (analytics) {
+        try {
+            analytics.logEvent(eventName, params);
+        } catch (e) { console.warn("Analytics log failed", e); }
+    }
+};
+
 // [ISSUE 3] PASSWORD RESET FIX: Added actionCodeSettings to prevent invalid link errors
 const actionCodeSettings = {
     url: "https://smart-settled.vercel.app",

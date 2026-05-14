@@ -182,6 +182,7 @@ async function handleForgotPassword() {
 // --- Google Sign-In ---
 async function handleGoogleLogin() {
     try {
+        logAnalyticsEvent('google_login');
         await loginWithGoogle(document.getElementById('remember-me').checked);
     } catch (e) {
         showAuthError(e.message);
@@ -190,6 +191,7 @@ async function handleGoogleLogin() {
 
 // --- Guest Mode ---
 function enterGuestMode() {
+    logAnalyticsEvent('guest_login');
     isGuestMode = true;
     guestIdCounter = 1;
     guestData = { groups: [{ id: 'g1', name: 'My Group', userId: 'guest' }], members: { g1: [] }, expenses: { g1: [] }, settlements: { g1: [] } };
@@ -807,7 +809,15 @@ async function loadPpl() {
             // Show associated user's displayName if available
             let displayName = p;
             if (assocUid && currentGroupData?.collaboratorDetails?.[assocUid]) {
-                displayName = currentGroupData.collaboratorDetails[assocUid].name || p;
+                const googleName = currentGroupData.collaboratorDetails[assocUid].name;
+                if (googleName && googleName !== p && !isGuestMode) {
+                    displayName = googleName; // Visually update immediately
+                    if (!window._syncingNames) window._syncingNames = new Set();
+                    if (!window._syncingNames.has(p)) {
+                        window._syncingNames.add(p);
+                        syncMemberNameSilent(p, googleName).then(() => window._syncingNames.delete(p));
+                    }
+                }
             }
             
             const assocCheckbox = !isGuestMode ? `<label class="assoc-checkbox-label" title="${isTaken ? 'Claimed by another user' : 'Associate yourself with this member'}">
@@ -846,6 +856,13 @@ async function addMem() {
     const name = el.value.trim();
     if (!curGrp) { notify("Please create or select a group first.", "error"); return; }
     if (!name) { notify("Please enter a member name.", "error"); return; }
+    
+    // Feature: Prevent duplicate member names
+    if (people.includes(name)) {
+        notify("Member name already exists. Please choose a different name.", "error");
+        return;
+    }
+    
     if (isGuestMode) {
         if (!guestData.members[curGrp]) guestData.members[curGrp] = [];
         guestData.members[curGrp].push(name);
@@ -853,6 +870,7 @@ async function addMem() {
     }
     await db.collection('members').add({ name: name, groupId: curGrp, userId: currentUser.uid });
     el.value = "";
+    logAnalyticsEvent('member_added', { group: curGrp });
     await refresh();
 }
 
@@ -916,6 +934,42 @@ async function editMemberName(oldName) {
         await batch.commit();
     }
     await refresh();
+}
+
+async function syncMemberNameSilent(oldName, finalName) {
+    if (!finalName || finalName.trim() === "" || finalName === oldName) return;
+    if (people.includes(finalName)) return; // Avoid collapsing into existing
+    try {
+        const batch = db.batch();
+        const uid = currentUser.uid;
+        
+        const memSnap = await db.collection('members').where('userId','==',uid).where('groupId','==',curGrp).where('name','==',oldName).get();
+        memSnap.forEach(doc => batch.update(doc.ref, { name: finalName }));
+        
+        const exSnap = await db.collection('expenses').where('userId','==',uid).where('groupId','==',curGrp).get();
+        exSnap.forEach(doc => {
+            const data = doc.data();
+            let changed = false;
+            const updateData = {};
+            if (data.payer === oldName) { updateData.payer = finalName; changed = true; }
+            if (data.participants && data.participants.includes(oldName)) {
+                updateData.participants = data.participants.map(p => p === oldName ? finalName : p);
+                changed = true;
+            }
+            if (changed) batch.update(doc.ref, updateData);
+        });
+        
+        const setSnap = await db.collection('settlements').where('userId','==',uid).where('groupId','==',curGrp).get();
+        setSnap.forEach(doc => {
+            const data = doc.data();
+            let changed = false;
+            const updateData = {};
+            if (data.payer === oldName) { updateData.payer = finalName; changed = true; }
+            if (data.receiver === oldName) { updateData.receiver = finalName; changed = true; }
+            if (changed) batch.update(doc.ref, updateData);
+        });
+        await batch.commit();
+    } catch(e) { console.warn("Silent sync failed", e); }
 }
 
 async function removeMember(name) {
@@ -1869,19 +1923,16 @@ function renderUsersTab() {
         
         // Feature 3: Payment reminder
         if (!isMe && window._lastBalances) {
-            // Find which member this user is associated with
             const assoc = currentGroupData.memberAssociations || {};
             const memberId = Object.entries(assoc).find(([mId, u]) => u === uid)?.[0];
-            const myMemberId = Object.entries(assoc).find(([mId, u]) => u === currentUser.uid)?.[0];
-            
             const memberName = window._memberData?.find(m => m.id === memberId)?.name;
-            const myName = window._memberData?.find(m => m.id === myMemberId)?.name;
             
-            if (memberName && myName) {
-                // Determine if this user owes ME specifically by looking at optimized debts
-                const owesMe = (window._lastOptimized || []).find(t => t.from === memberName && t.to === myName);
-                if (owesMe) {
-                    actionButtons += `<button class="btn btn-sm remind-btn" id="remind-${uid}" onclick="sendPaymentReminder('${uid}', '${displayName.replace(/'/g, "\\'")}', '${info.email}', ${owesMe.amount}, '${myName.replace(/'/g, "\\'")}')" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); padding:4px 8px; font-size:0.75rem;">Remind</button>`;
+            if (memberName) {
+                // If this user has a negative balance overall, they owe the group
+                const userBalance = window._lastBalances[memberName];
+                if (userBalance !== undefined && userBalance < -0.01) {
+                    const absAmount = Math.abs(userBalance).toFixed(2);
+                    actionButtons += `<button class="btn btn-sm remind-btn" id="remind-${uid}" onclick="sendPaymentReminder('${uid}', '${displayName.replace(/'/g, "\\'")}', '${info.email}', ${absAmount})" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); padding:4px 8px; font-size:0.75rem;"><i data-lucide="bell" style="width:12px;height:12px;margin-right:4px;"></i>Remind</button>`;
                 }
             }
         }
@@ -2079,7 +2130,7 @@ async function kickCollaborator(uid, displayName) {
 
 // ========== FEATURE 3: PAYMENT REMINDER ==========
 let _lastRemindTime = 0;
-function sendPaymentReminder(uid, displayName, email, amount, myName) {
+function sendPaymentReminder(uid, displayName, email, amount) {
     const now = Date.now();
     if (now - _lastRemindTime < 30000) {
         notify("Please wait 30 seconds before sending another reminder.", "error");
@@ -2090,8 +2141,9 @@ function sendPaymentReminder(uid, displayName, email, amount, myName) {
     const btn = document.getElementById(`remind-${uid}`);
     if (btn) {
         btn.disabled = true;
-        btn.textContent = "Sent \u2713";
-        setTimeout(() => { btn.disabled = false; btn.textContent = "Remind"; }, 30000);
+        btn.innerHTML = "<i data-lucide='check' style='width:12px;height:12px;margin-right:4px;'></i>Sent";
+        lucide.createIcons();
+        setTimeout(() => { btn.disabled = false; btn.innerHTML = "<i data-lucide='bell' style='width:12px;height:12px;margin-right:4px;'></i>Remind"; lucide.createIcons(); }, 30000);
     }
     
     _lastRemindTime = now;
@@ -2102,9 +2154,9 @@ function sendPaymentReminder(uid, displayName, email, amount, myName) {
     const subject = encodeURIComponent(`Payment Reminder: SmartSettled - ${groupName}`);
     const body = encodeURIComponent(
         `Hi ${displayName},\n\n` +
-        `This is a friendly reminder that you owe ₹${amount} to ${myName} in the group "${groupName}".\n\n` +
+        `This is a friendly reminder that you have an outstanding balance of ₹${amount} in the group "${groupName}".\n\n` +
         `You can view the details and settle up here:\n${link}\n\n` +
-        `Thanks,\n${myName} (via SmartSettled)`
+        `Thanks,\nSmartSettled`
     );
     
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
@@ -2205,6 +2257,31 @@ async function submitBugReport() {
     }
 }
 
+function submitBugReportEmail() {
+    const title = document.getElementById('bug-title').value.trim();
+    const desc = document.getElementById('bug-desc').value.trim();
+    const errEl = document.getElementById('bug-error');
+    
+    if (!title || !desc) {
+        errEl.textContent = "Please fill out both title and description.";
+        errEl.style.display = 'block';
+        return;
+    }
+    
+    const contextInfo = `Group ID: ${curGrp || 'None'}\n` +
+                        `User ID: ${currentUser ? currentUser.uid : 'Guest'}\n` +
+                        `Is Guest Mode: ${isGuestMode}\n` +
+                        `User Agent: ${navigator.userAgent}`;
+                        
+    const subject = encodeURIComponent(`SmartSettled Bug: ${title}`);
+    const body = encodeURIComponent(`Bug Description:\n${desc}\n\n\n--- Debug Info ---\n${contextInfo}`);
+    const recipients = "harshitrawat3125@gmail.com,rawatharshit3424@gmail.com";
+    
+    window.location.href = `mailto:${recipients}?subject=${subject}&body=${body}`;
+    closeBugReport();
+    notify("Opened your email client");
+}
+
 // ========== MOBILE GESTURES & NAVIGATION ==========
 
 // Swipe to open/close sidebar
@@ -2228,7 +2305,7 @@ function handleSwipeGesture() {
     const swipeDist = touchendX - touchstartX;
     
     // Swipe Right to open (only if starting from left edge)
-    if (swipeDist > 50 && touchstartX < 30) {
+    if (swipeDist > 30 && touchstartX < 60) {
         if (!sidebar.classList.contains('open')) toggleSidebar();
     }
     // Swipe Left to close
