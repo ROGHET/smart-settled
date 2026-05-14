@@ -43,6 +43,11 @@ function handleAuthState(user) {
         if (hubScreen) hubScreen.style.display = 'block';
         if (appContainer) appContainer.style.display = 'none';
         
+        // Use history API for back button support
+        if (!window.location.search.includes('group=')) {
+            history.replaceState({ screen: 'hub' }, "", window.location.pathname);
+        }
+        
         const guestBanner = document.getElementById('guest-banner');
         if (guestBanner) guestBanner.style.display = 'none';
 
@@ -574,10 +579,15 @@ async function loadHubGroupSummary(group) {
         
         // Check personal association
         const assoc = group.memberAssociations || {};
-        const myMember = Object.entries(assoc).find(([m, uid]) => uid === currentUser?.uid)?.[0];
+        const myMemberId = Object.entries(assoc).find(([mId, uid]) => uid === currentUser?.uid)?.[0];
+        let myMemberName = myMemberId; // fallback
+        if (myMemberId) {
+            // Find name from members collection snap
+            memSnap.forEach(doc => { if (doc.id === myMemberId) myMemberName = doc.data().name; });
+        }
         
-        if (myMember && balances[myMember] !== undefined) {
-            const bal = Math.round(balances[myMember] * 100) / 100;
+        if (myMemberId && balances[myMemberName] !== undefined) {
+            const bal = Math.round(balances[myMemberName] * 100) / 100;
             if (bal < -0.01) el.innerHTML = `<span style="color:#ef4444">You owe ₹${Math.abs(bal).toFixed(2)}</span>`;
             else if (bal > 0.01) el.innerHTML = `<span style="color:#10b981">You are owed ₹${bal.toFixed(2)}</span>`;
             else el.innerHTML = `<span style="color:#10b981">All settled ✓</span>`;
@@ -593,6 +603,10 @@ function enterGroupFromHub(id, name) {
     document.getElementById('group-title').innerText = name;
     document.getElementById('group-hub-screen').style.display = 'none';
     document.getElementById('app-container').style.display = 'flex';
+    
+    // Support mobile back button
+    history.pushState({ screen: 'app' }, "", "?group=" + curGrp);
+    
     loadGrps();
     switchSection('dashboard', document.querySelector('.nav-item'));
 }
@@ -759,12 +773,17 @@ async function leaveGrp(groupId) {
 
 // --- Members ---
 async function loadPpl() {
+    window._memberData = [];
     if (isGuestMode) {
         people = (guestData.members[curGrp] || []).slice();
+        window._memberData = people.map((p, i) => ({ id: 'guest_' + i, name: p }));
     } else {
         const snap = await db.collection('members').where('groupId', '==', curGrp).get();
         people = [];
-        snap.forEach(doc => people.push(doc.data().name));
+        snap.forEach(doc => {
+            people.push(doc.data().name);
+            window._memberData.push({ id: doc.id, name: doc.data().name });
+        });
     }
     
     // Load member associations
@@ -772,10 +791,14 @@ async function loadPpl() {
     const associations = (currentGroupData?.memberAssociations) || {};
     window._currentAssociations = associations;
     
-    document.getElementById('people-list').innerHTML = people.length ?
-        people.map(p => {
+    document.getElementById('people-list').innerHTML = window._memberData.length ?
+        window._memberData.map(memberObj => {
+            const p = memberObj.name;
+            const mId = memberObj.id;
             const safeName = p.replace(/'/g, "\\'").replace(/"/g, "&quot;");
-            const assocUid = associations[p];
+            const safeId = mId.replace(/'/g, "\\'");
+            
+            const assocUid = associations[mId];
             const isMyAssoc = assocUid === currentUser?.uid;
             const isTaken = assocUid && assocUid !== currentUser?.uid;
             const checkboxDisabled = isTaken ? 'disabled' : '';
@@ -788,7 +811,7 @@ async function loadPpl() {
             }
             
             const assocCheckbox = !isGuestMode ? `<label class="assoc-checkbox-label" title="${isTaken ? 'Claimed by another user' : 'Associate yourself with this member'}">
-                <input type="checkbox" class="assoc-checkbox" data-member="${safeName}" ${checkboxChecked} ${checkboxDisabled} onchange="toggleMemberAssociation('${safeName}', this.checked)">
+                <input type="checkbox" class="assoc-checkbox" data-memberid="${safeId}" ${checkboxChecked} ${checkboxDisabled} onchange="toggleMemberAssociation('${safeId}', this.checked)">
             </label>` : '';
             
             return `<div class="list-item member-item">
@@ -1298,18 +1321,20 @@ function computeStatus() {
     const personalEl = document.getElementById('personal-summary');
     if (personalEl) {
         const assoc = window._currentAssociations || {};
-        const myMember = Object.entries(assoc).find(([m, uid]) => uid === currentUser?.uid)?.[0];
+        const myMemberId = Object.entries(assoc).find(([mId, uid]) => uid === currentUser?.uid)?.[0];
+        const myMember = window._memberData?.find(m => m.id === myMemberId)?.name;
+        
         if (myMember && balances[myMember] !== undefined) {
             const bal = Math.round(balances[myMember] * 100) / 100;
             window._myBalance = bal;
             if (bal < -0.01) {
-                personalEl.innerHTML = `<span class="banner-icon">💸</span> You owe <strong style="color:#ef4444;margin:0 4px;">₹${Math.abs(bal).toFixed(2)}</strong>`;
+                personalEl.innerHTML = `<i data-lucide="trending-down" style="color:#ef4444;margin-right:8px;"></i> You owe <strong style="color:#ef4444;margin:0 4px;">₹${Math.abs(bal).toFixed(2)}</strong>`;
                 personalEl.style.display = 'flex';
             } else if (bal > 0.01) {
-                personalEl.innerHTML = `<span class="banner-icon">💰</span> You are owed <strong style="color:#10b981;margin:0 4px;">₹${bal.toFixed(2)}</strong>`;
+                personalEl.innerHTML = `<i data-lucide="trending-up" style="color:#10b981;margin-right:8px;"></i> You are owed <strong style="color:#10b981;margin:0 4px;">₹${bal.toFixed(2)}</strong>`;
                 personalEl.style.display = 'flex';
             } else {
-                personalEl.innerHTML = `<span class="banner-icon">🎉</span> You're all settled!`;
+                personalEl.innerHTML = `<i data-lucide="check-circle-2" style="color:#10b981;margin-right:8px;"></i> You're all settled!`;
                 personalEl.style.display = 'flex';
             }
         } else {
@@ -1317,7 +1342,7 @@ function computeStatus() {
         }
     }
 
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
     if (document.getElementById('graph-view').classList.contains('active')) renderGraph(optimized);
     if (document.getElementById('analytics').classList.contains('active')) renderCharts(balances, spendingPerMember);
     renderUsersTab();
@@ -1714,6 +1739,20 @@ async function processGroupJoin(sharedGroupId) {
             
             if (!uids.includes(currentUser.uid)) {
                 uids.push(currentUser.uid);
+                
+                // Feature: Auto-create member on join
+                try {
+                    const newMemberRef = await db.collection('members').add({
+                        groupId: sharedGroupId,
+                        name: userName,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    // Auto-associate the new member
+                    const docToUpdate = await docRef.get();
+                    let currentAssoc = docToUpdate.data().memberAssociations || {};
+                    currentAssoc[newMemberRef.id] = currentUser.uid;
+                    await docRef.update({ memberAssociations: currentAssoc });
+                } catch(e) { console.warn("Auto-member creation failed", e); }
             }
             
             await docRef.update({
@@ -1832,14 +1871,17 @@ function renderUsersTab() {
         if (!isMe && window._lastBalances) {
             // Find which member this user is associated with
             const assoc = currentGroupData.memberAssociations || {};
-            const memberName = Object.entries(assoc).find(([m, u]) => u === uid)?.[0];
-            const myName = Object.entries(assoc).find(([m, u]) => u === currentUser.uid)?.[0];
+            const memberId = Object.entries(assoc).find(([mId, u]) => u === uid)?.[0];
+            const myMemberId = Object.entries(assoc).find(([mId, u]) => u === currentUser.uid)?.[0];
+            
+            const memberName = window._memberData?.find(m => m.id === memberId)?.name;
+            const myName = window._memberData?.find(m => m.id === myMemberId)?.name;
             
             if (memberName && myName) {
                 // Determine if this user owes ME specifically by looking at optimized debts
                 const owesMe = (window._lastOptimized || []).find(t => t.from === memberName && t.to === myName);
                 if (owesMe) {
-                    actionButtons += `<button class="remind-btn" id="remind-${uid}" onclick="sendPaymentReminder('${uid}', '${displayName.replace(/'/g, "\\'")}', '${info.email}', ${owesMe.amount}, '${myName.replace(/'/g, "\\'")}')">Remind</button>`;
+                    actionButtons += `<button class="btn btn-sm remind-btn" id="remind-${uid}" onclick="sendPaymentReminder('${uid}', '${displayName.replace(/'/g, "\\'")}', '${info.email}', ${owesMe.amount}, '${myName.replace(/'/g, "\\'")}')" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); padding:4px 8px; font-size:0.75rem;">Remind</button>`;
                 }
             }
         }
@@ -2070,7 +2112,7 @@ function sendPaymentReminder(uid, displayName, email, amount, myName) {
 }
 
 // ========== FEATURE 1: MEMBER ASSOCIATION ==========
-async function toggleMemberAssociation(memberName, checked) {
+async function toggleMemberAssociation(memberId, checked) {
     try {
         const docRef = db.collection('groups').doc(curGrp);
         const doc = await docRef.get();
@@ -2080,12 +2122,12 @@ async function toggleMemberAssociation(memberName, checked) {
         
         if (checked) {
             // Un-associate from any other member first
-            for (const [m, u] of Object.entries(assoc)) {
-                if (u === currentUser.uid) delete assoc[m];
+            for (const [mId, u] of Object.entries(assoc)) {
+                if (u === currentUser.uid) delete assoc[mId];
             }
-            assoc[memberName] = currentUser.uid;
+            assoc[memberId] = currentUser.uid;
         } else {
-            delete assoc[memberName];
+            delete assoc[memberId];
         }
         
         await docRef.update({ memberAssociations: assoc });
@@ -2095,6 +2137,7 @@ async function toggleMemberAssociation(memberName, checked) {
         if (grp) grp.memberAssociations = assoc;
         window._currentAssociations = assoc;
         
+        const memberName = window._memberData?.find(m => m.id === memberId)?.name || memberId;
         await loadPpl(); // Re-render members to update checkboxes
         computeStatus(); // Re-render dashboard summary
         
@@ -2117,7 +2160,7 @@ function closeBugReport() {
     document.getElementById('bug-report-modal').style.display = 'none';
 }
 
-function submitBugReport() {
+async function submitBugReport() {
     const title = document.getElementById('bug-title').value.trim();
     const desc = document.getElementById('bug-desc').value.trim();
     const errEl = document.getElementById('bug-error');
@@ -2128,19 +2171,88 @@ function submitBugReport() {
         return;
     }
     
-    const contextInfo = `Group ID: ${curGrp || 'None'}\n` +
-                        `User ID: ${currentUser ? currentUser.uid : 'Guest'}\n` +
-                        `Is Guest Mode: ${isGuestMode}\n` +
-                        `User Agent: ${navigator.userAgent}`;
-                        
-    const subject = encodeURIComponent(`SmartSettled Bug: ${title}`);
-    const body = encodeURIComponent(`Bug Description:\n${desc}\n\n\n--- Debug Info ---\n${contextInfo}`);
+    const contextInfo = {
+        groupId: curGrp || 'None',
+        userId: currentUser ? currentUser.uid : 'Guest',
+        isGuestMode: isGuestMode,
+        userAgent: navigator.userAgent
+    };
     
-    // Multiple recipients separated by comma
-    const recipients = "harshitrawat3125@gmail.com,rawatharshit3424@gmail.com";
-    
-    window.location.href = `mailto:${recipients}?subject=${subject}&body=${body}`;
-    
-    closeBugReport();
-    notify("Bug report opened in your email client");
+    try {
+        const btn = document.querySelector('#bug-report-modal .btn-primary');
+        const originalText = btn.textContent;
+        btn.textContent = "Sending...";
+        btn.disabled = true;
+        
+        await db.collection('bugReports').add({
+            title: title,
+            description: desc,
+            context: contextInfo,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        btn.textContent = originalText;
+        btn.disabled = false;
+        closeBugReport();
+        notify("Bug report sent successfully! Thank you.");
+    } catch (e) {
+        console.error("Bug report error:", e);
+        errEl.textContent = "Could not send report. Please try again.";
+        errEl.style.display = 'block';
+        const btn = document.querySelector('#bug-report-modal .btn-primary');
+        btn.textContent = "Send Report";
+        btn.disabled = false;
+    }
 }
+
+// ========== MOBILE GESTURES & NAVIGATION ==========
+
+// Swipe to open/close sidebar
+let touchstartX = 0;
+let touchendX = 0;
+
+document.addEventListener('touchstart', e => {
+    touchstartX = e.changedTouches[0].screenX;
+}, { passive: true });
+
+document.addEventListener('touchend', e => {
+    touchendX = e.changedTouches[0].screenX;
+    handleSwipeGesture();
+}, { passive: true });
+
+function handleSwipeGesture() {
+    // Only process if in app screen
+    if (document.getElementById('app-container').style.display === 'none') return;
+    
+    const sidebar = document.getElementById('main-sidebar');
+    const swipeDist = touchendX - touchstartX;
+    
+    // Swipe Right to open (only if starting from left edge)
+    if (swipeDist > 50 && touchstartX < 30) {
+        if (!sidebar.classList.contains('open')) toggleSidebar();
+    }
+    // Swipe Left to close
+    if (swipeDist < -50 && sidebar.classList.contains('open')) {
+        toggleSidebar();
+    }
+}
+
+// Handle browser back button (returns to Hub from App)
+window.addEventListener('popstate', (e) => {
+    if (!currentUser || isGuestMode) return;
+    
+    const hubScreen = document.getElementById('group-hub-screen');
+    const appContainer = document.getElementById('app-container');
+    
+    // If state is hub or there is no state (meaning they went back to base url)
+    if (!e.state || e.state.screen === 'hub') {
+        if (appContainer.style.display !== 'none') {
+            appContainer.style.display = 'none';
+            hubScreen.style.display = 'block';
+            curGrp = null;
+        }
+    } else if (e.state.screen === 'app') {
+        hubScreen.style.display = 'none';
+        appContainer.style.display = 'flex';
+    }
+});
