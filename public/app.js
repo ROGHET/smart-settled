@@ -27,15 +27,21 @@ let isGoogleSigningIn = false;
 function handleAuthState(user) {
     console.log("Handling auth state for:", user ? user.email : "null");
 
+    const splashScreen = document.getElementById('splash-screen');
     const authScreen = document.getElementById('auth-screen');
     const appContainer = document.getElementById('app-container');
+    const hubScreen = document.getElementById('group-hub-screen');
+
+    // Always hide splash first
+    if (splashScreen) splashScreen.style.display = 'none';
 
     if (user) {
         currentUser = user;
         isGuestMode = false;
 
         if (authScreen) authScreen.style.display = 'none';
-        if (appContainer) appContainer.style.display = 'flex';
+        if (hubScreen) hubScreen.style.display = 'block';
+        if (appContainer) appContainer.style.display = 'none';
         
         const guestBanner = document.getElementById('guest-banner');
         if (guestBanner) guestBanner.style.display = 'none';
@@ -43,7 +49,7 @@ function handleAuthState(user) {
         lucide.createIcons();
         updateUserDisplay();
 
-        if (typeof loadGrps === "function") loadGrps();
+        if (typeof loadGrps === "function") loadGrpsForHub();
 
     } else {
         currentUser = null;
@@ -51,6 +57,7 @@ function handleAuthState(user) {
         if (!isGuestMode) {
             if (authScreen) authScreen.style.display = 'flex';
             if (appContainer) appContainer.style.display = 'none';
+            if (hubScreen) hubScreen.style.display = 'none';
             const guestBanner = document.getElementById('guest-banner');
             if (guestBanner) guestBanner.style.display = 'none';
         }
@@ -90,17 +97,28 @@ function changeUsername() {
     if (user) {
         user.updateProfile({
             displayName: newName
-        }).then(() => {
-            alert("Username updated");
+        }).then(async () => {
+            // Update collaboratorDetails in all groups containing this user
+            try {
+                const uid = user.uid;
+                const snap = await db.collection('groups').where('contributorUids', 'array-contains', uid).get();
+                const batch = db.batch();
+                snap.forEach(doc => {
+                    batch.update(doc.ref, {
+                        ['collaboratorDetails.' + uid + '.name']: newName.trim()
+                    });
+                });
+                await batch.commit();
+            } catch (e) { console.error('Failed to sync username to groups:', e); }
 
-            // 🔥 UPDATE UI WITHOUT RELOAD
+            notify("Username updated!");
             updateUserDisplay?.();
         });
     } else {
         // ✅ ALLOW guest username
         localStorage.setItem("guestUsername", newName);
 
-        alert("Username updated (Guest)");
+        notify("Username updated (Guest)");
 
         // update UI instantly
         updateUserDisplay?.();
@@ -171,7 +189,9 @@ function enterGuestMode() {
     guestIdCounter = 1;
     guestData = { groups: [{ id: 'g1', name: 'My Group', userId: 'guest' }], members: { g1: [] }, expenses: { g1: [] }, settlements: { g1: [] } };
     curGrp = 'g1';
+    document.getElementById('splash-screen').style.display = 'none';
     document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('group-hub-screen').style.display = 'none';
     document.getElementById('app-container').style.display = 'flex';
     document.getElementById('guest-banner').style.display = 'block';
     document.getElementById('group-title').innerText = 'My Group';
@@ -283,6 +303,29 @@ document.addEventListener('DOMContentLoaded', function() {
         window.navInitialized = true;
     }
 
+    // --- Mobile Swipe Gestures ---
+    let touchStartX = 0, touchStartY = 0;
+    document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }, { passive: true });
+    document.addEventListener('touchend', e => {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        const dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+        if (dy > 60) return;
+        const sidebar = document.getElementById('main-sidebar');
+        if (dx > 60 && touchStartX < 40) toggleSidebar();
+        if (dx < -60 && sidebar.classList.contains('open')) toggleSidebar();
+    }, { passive: true });
+
+    // --- Close dropdowns on outside click ---
+    document.addEventListener('click', e => {
+        const pd = document.getElementById('profile-dropdown');
+        const pt = document.getElementById('profile-trigger');
+        if (pd && pd.classList.contains('show') && !pt.contains(e.target) && !pd.contains(e.target))
+            pd.classList.remove('show');
+        const sd = document.getElementById('share-dropdown');
+        if (sd && sd.classList.contains('show') && !e.target.closest('[onclick*="share-dropdown"]'))
+            sd.classList.remove('show');
+    });
+
     lucide.createIcons();
 });
 
@@ -386,6 +429,22 @@ async function loadGrps() {
         const data = Array.from(dataMap.values());
         data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
         
+        // Fix 1: Patch missing collaboratorDetails for current user
+        const userName = currentUser.displayName || currentUser.email.split('@')[0];
+        const userEmail = currentUser.email;
+        for (const g of data) {
+            const details = g.collaboratorDetails || {};
+            if (!details[uid]) {
+                details[uid] = { name: userName, email: userEmail };
+                g.collaboratorDetails = details;
+                try {
+                    await db.collection('groups').doc(g.id).update({
+                        ['collaboratorDetails.' + uid]: { name: userName, email: userEmail }
+                    });
+                } catch (e) { console.warn('Could not patch collaborator details for', g.id); }
+            }
+        }
+        
         window.allUserGroups = data; // store for reference
         
         const listEl = document.getElementById('grp-list');
@@ -419,6 +478,152 @@ async function loadGrps() {
             clearUI();
         }
     } catch (err) { console.error(err); }
+}
+
+// --- Hub Screen Group Loader ---
+async function loadGrpsForHub() {
+    if (isGuestMode) return;
+    try {
+        const uid = currentUser.uid;
+        const ownedSnap = await db.collection('groups').where('userId', '==', uid).get();
+        const sharedSnap = await db.collection('groups').where('contributorUids', 'array-contains', uid).get();
+        const dataMap = new Map();
+        ownedSnap.forEach(doc => dataMap.set(doc.id, { id: doc.id, ...doc.data() }));
+        sharedSnap.forEach(doc => dataMap.set(doc.id, { id: doc.id, ...doc.data() }));
+        const data = Array.from(dataMap.values());
+        data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+        
+        // Patch missing collaborator details
+        const userName = currentUser.displayName || currentUser.email.split('@')[0];
+        const userEmail = currentUser.email;
+        for (const g of data) {
+            const details = g.collaboratorDetails || {};
+            if (!details[uid]) {
+                details[uid] = { name: userName, email: userEmail };
+                g.collaboratorDetails = details;
+                try { await db.collection('groups').doc(g.id).update({ ['collaboratorDetails.' + uid]: { name: userName, email: userEmail } }); } catch(e) {}
+            }
+        }
+        
+        window.allUserGroups = data;
+        renderGroupHub(data);
+    } catch (err) { console.error(err); }
+}
+
+async function renderGroupHub(groups) {
+    const grid = document.getElementById('hub-grid');
+    if (!groups || !groups.length) {
+        grid.innerHTML = '<div class="hub-empty"><p>No groups yet. Create one or join with a code!</p></div>';
+        if (window.lucide) lucide.createIcons();
+        return;
+    }
+    // Render cards with loading summaries
+    grid.innerHTML = groups.map(g => {
+        const safe = (g.name || '').replace(/'/g, "\\'");
+        return `<div class="hub-group-card" onclick="enterGroupFromHub('${g.id}', '${safe}')">
+            <div class="hub-card-name">${g.name}</div>
+            <div class="hub-card-summary" id="hub-summary-${g.id}">Loading...</div>
+            <div class="hub-card-actions">
+                <button onclick="event.stopPropagation(); shareGroupFromHub('${g.id}')"><i data-lucide="share-2" style="width:12px;height:12px"></i> Share</button>
+            </div>
+        </div>`;
+    }).join('');
+    if (window.lucide) lucide.createIcons();
+    
+    // Load summaries async per group
+    for (const g of groups) {
+        loadHubGroupSummary(g);
+    }
+}
+
+async function loadHubGroupSummary(group) {
+    const el = document.getElementById('hub-summary-' + group.id);
+    if (!el) return;
+    try {
+        const exSnap = await db.collection('expenses').where('groupId', '==', group.id).get();
+        const setSnap = await db.collection('settlements').where('groupId', '==', group.id).get();
+        const memSnap = await db.collection('members').where('groupId', '==', group.id).get();
+        const members = []; memSnap.forEach(doc => members.push(doc.data().name));
+        const expenses = []; exSnap.forEach(doc => expenses.push(doc.data()));
+        const settlements = []; setSnap.forEach(doc => settlements.push(doc.data()));
+        
+        if (!expenses.length) { el.textContent = 'No expenses yet'; return; }
+        
+        // Compute balances
+        const balances = {};
+        members.forEach(n => balances[n] = 0);
+        expenses.forEach(e => {
+            if (e.settled && (!e.settledBy || Object.keys(e.settledBy).length === 0)) return;
+            const parts = e.participants || [];
+            if (!parts.length) return;
+            const cs = e.customSplits || {};
+            if (Object.keys(cs).length > 0) {
+                let tc = 0;
+                parts.forEach(p => { const ps = cs[p] !== undefined ? cs[p] : 0; if (ps > 0 && p in balances) balances[p] -= ps; tc += ps; });
+                if (e.payer in balances) balances[e.payer] += tc;
+            } else {
+                const split = e.amount / parts.length;
+                parts.forEach(p => { if (p in balances) balances[p] -= split; });
+                if (e.payer in balances) balances[e.payer] += e.amount;
+            }
+        });
+        settlements.forEach(s => {
+            if (s.payer in balances) balances[s.payer] += s.amount;
+            if (s.receiver in balances) balances[s.receiver] -= s.amount;
+        });
+        
+        // Check personal association
+        const assoc = group.memberAssociations || {};
+        const myMember = Object.entries(assoc).find(([m, uid]) => uid === currentUser?.uid)?.[0];
+        
+        if (myMember && balances[myMember] !== undefined) {
+            const bal = Math.round(balances[myMember] * 100) / 100;
+            if (bal < -0.01) el.innerHTML = `<span style="color:#ef4444">You owe ₹${Math.abs(bal).toFixed(2)}</span>`;
+            else if (bal > 0.01) el.innerHTML = `<span style="color:#10b981">You are owed ₹${bal.toFixed(2)}</span>`;
+            else el.innerHTML = `<span style="color:#10b981">All settled ✓</span>`;
+        } else {
+            const opt = optimizeDebts(balances);
+            el.textContent = opt.length === 0 ? 'All settled ✓' : `${members.length} members · ${expenses.length} expenses`;
+        }
+    } catch (e) { el.textContent = 'Could not load summary'; }
+}
+
+function enterGroupFromHub(id, name) {
+    curGrp = id;
+    document.getElementById('group-title').innerText = name;
+    document.getElementById('group-hub-screen').style.display = 'none';
+    document.getElementById('app-container').style.display = 'flex';
+    loadGrps();
+    switchSection('dashboard', document.querySelector('.nav-item'));
+}
+
+function shareGroupFromHub(groupId) {
+    const link = `${window.location.origin}?group=${groupId}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(() => notify('Invite link copied!')).catch(() => prompt('Copy this:', link));
+    } else { prompt('Copy this:', link); }
+}
+
+async function hubCreateGroup() {
+    const el = document.getElementById('hub-group-input');
+    const name = el.value.trim();
+    if (!name) { notify('Enter a group name', 'error'); return; }
+    const uid = currentUser.uid;
+    const userName = currentUser.displayName || currentUser.email.split('@')[0];
+    const userEmail = currentUser.email;
+    await db.collection('groups').add({ name, userId: uid, contributorUids: [uid], collaboratorDetails: { [uid]: { name: userName, email: userEmail } }, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    el.value = '';
+    await loadGrpsForHub();
+    notify('Group created!');
+}
+
+async function hubJoinGroup() {
+    const el = document.getElementById('hub-group-input');
+    const code = el.value.trim();
+    if (!code) { notify('Enter a group code', 'error'); return; }
+    el.value = '';
+    await processGroupJoin(code);
+    await loadGrpsForHub();
 }
 
 async function selGrp(id, name) {
@@ -561,11 +766,34 @@ async function loadPpl() {
         people = [];
         snap.forEach(doc => people.push(doc.data().name));
     }
+    
+    // Load member associations
+    const currentGroupData = window.allUserGroups?.find(g => g.id === curGrp);
+    const associations = (currentGroupData?.memberAssociations) || {};
+    window._currentAssociations = associations;
+    
     document.getElementById('people-list').innerHTML = people.length ?
         people.map(p => {
             const safeName = p.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+            const assocUid = associations[p];
+            const isMyAssoc = assocUid === currentUser?.uid;
+            const isTaken = assocUid && assocUid !== currentUser?.uid;
+            const checkboxDisabled = isTaken ? 'disabled' : '';
+            const checkboxChecked = isMyAssoc ? 'checked' : '';
+            
+            // Show associated user's displayName if available
+            let displayName = p;
+            if (assocUid && currentGroupData?.collaboratorDetails?.[assocUid]) {
+                displayName = currentGroupData.collaboratorDetails[assocUid].name || p;
+            }
+            
+            const assocCheckbox = !isGuestMode ? `<label class="assoc-checkbox-label" title="${isTaken ? 'Claimed by another user' : 'Associate yourself with this member'}">
+                <input type="checkbox" class="assoc-checkbox" data-member="${safeName}" ${checkboxChecked} ${checkboxDisabled} onchange="toggleMemberAssociation('${safeName}', this.checked)">
+            </label>` : '';
+            
             return `<div class="list-item member-item">
-                <span class="member-name">${p}</span>
+                ${assocCheckbox}
+                <span class="member-name" style="flex:1">${displayName}${assocUid ? ' <span style="font-size:0.65rem;color:var(--primary-light);">\u2713</span>' : ''}</span>
                 <div style="display:flex; gap:10px;">
                     <button class="edit-member-btn" title="Edit name" onclick="editMemberName('${safeName}')">
                         <i data-lucide="pencil" style="width:16px;height:16px;color:var(--text-main);"></i>
@@ -578,9 +806,15 @@ async function loadPpl() {
         }).join("") :
         '<p style="color:var(--text-dim); font-size:0.85rem; padding:10px; text-align:center;">No members yet.</p>';
     if (window.lucide) lucide.createIcons();
-    ['ex-payer', 'user-pdf-sel'].forEach(id => {
-        document.getElementById(id).innerHTML = people.map(p => `<option value="${p}">${p}</option>`).join("");
-    });
+    
+    // Fix 6: Default "Select Member" for dropdowns
+    document.getElementById('ex-payer').innerHTML = 
+        '<option value="" disabled selected>Select Member</option>' +
+        people.map(p => `<option value="${p}">${p}</option>`).join('');
+    document.getElementById('user-pdf-sel').innerHTML = 
+        '<option value="" disabled selected>Select Member</option>' +
+        people.map(p => `<option value="${p}">${p}</option>`).join('');
+    
     document.getElementById('ex-parts').innerHTML = people.map(p => `<div class="pill selected" onclick="this.classList.toggle('selected')">${p}</div>`).join("");
 }
 
@@ -750,13 +984,16 @@ function renderExpenseList(list) {
             const allDashboardSettled = nonPayerParts.every(p => settledBy[p] === true);
             let shouldGreyOut = isFullySettled || allDashboardSettled;
             
+            // Fix 5: Grey out if all accounts settled on dashboard
+            if (window._allSettled) shouldGreyOut = true;
+            
             // Grey out if I am logged in, not the payer, and I already settled my share
             if (!shouldGreyOut && myName && myName !== e.payer && settledBy[myName]) {
                 shouldGreyOut = true;
             }
 
             if (shouldGreyOut) {
-                settleBtn = `<div class="settle-all-row"><button class="settle-expense-btn" disabled style="opacity:0.35;cursor:not-allowed;border-color:var(--text-dim);color:var(--text-dim);">Settled</button></div>`;
+                settleBtn = `<div class="settle-all-row"><button class="settle-expense-btn" disabled style="opacity:0.35;cursor:not-allowed;border-color:var(--text-dim);color:var(--text-dim);">\u2713 Settled</button></div>`;
             } else {
                 settleBtn = `<div class="settle-all-row"><button class="settle-expense-btn" onclick="settleExpense('${safeId}')">Settle</button></div>`;
             }
@@ -792,6 +1029,7 @@ async function addEx() {
     const p = document.getElementById('ex-payer').value;
     const a = parseFloat(document.getElementById('ex-amt').value);
     const d = document.getElementById('ex-desc').value.trim() || 'Expense';
+    if (!p || p === '') return notify("Please select who paid!", "error");
     let parts = Array.from(document.querySelectorAll('#ex-parts .pill.selected')).map(el => el.innerText);
     if (!a || !parts.length) return notify("Missing amount or split!", "error");
 
@@ -1038,6 +1276,9 @@ function computeStatus() {
     }
     if (Object.keys(balances).length === 0) { highSpender = '-'; mostOwed = '-'; }
     const optimized = optimizeDebts(balances);
+    
+    // Fix 5: Set global flag for settle button greying
+    window._allSettled = optimized.length === 0;
 
     document.getElementById('st-total').innerText = `₹${totalSpentAll.toLocaleString()}`;
     document.getElementById('st-best').innerText = highSpender;
@@ -1052,6 +1293,29 @@ function computeStatus() {
             <button class="btn btn-primary btn-sm" onclick="settleNow('${sf}', '${st}', ${t.amount})">Mark Paid</button>
         </div>`;
     }).join("") : '<div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.2); padding:1rem; border-radius:12px; color:#10b981; font-size:0.9rem; text-align:center;">All accounts settled!</div>';
+
+    // Personal summary banner (Feature 1 - association)
+    const personalEl = document.getElementById('personal-summary');
+    if (personalEl) {
+        const assoc = window._currentAssociations || {};
+        const myMember = Object.entries(assoc).find(([m, uid]) => uid === currentUser?.uid)?.[0];
+        if (myMember && balances[myMember] !== undefined) {
+            const bal = Math.round(balances[myMember] * 100) / 100;
+            window._myBalance = bal;
+            if (bal < -0.01) {
+                personalEl.innerHTML = `<span class="banner-icon">💸</span> You owe <strong style="color:#ef4444;margin:0 4px;">₹${Math.abs(bal).toFixed(2)}</strong>`;
+                personalEl.style.display = 'flex';
+            } else if (bal > 0.01) {
+                personalEl.innerHTML = `<span class="banner-icon">💰</span> You are owed <strong style="color:#10b981;margin:0 4px;">₹${bal.toFixed(2)}</strong>`;
+                personalEl.style.display = 'flex';
+            } else {
+                personalEl.innerHTML = `<span class="banner-icon">🎉</span> You're all settled!`;
+                personalEl.style.display = 'flex';
+            }
+        } else {
+            personalEl.style.display = 'none';
+        }
+    }
 
     lucide.createIcons();
     if (document.getElementById('graph-view').classList.contains('active')) renderGraph(optimized);
@@ -1442,19 +1706,20 @@ async function processGroupJoin(sharedGroupId) {
         if (doc.exists) {
             const groupData = doc.data();
             const uids = groupData.contributorUids || [];
+            const userName = currentUser.displayName || currentUser.email.split('@')[0];
             
-            // Add user if not already in the group
+            // Always refresh collaborator details for current user
+            const details = groupData.collaboratorDetails || {};
+            details[currentUser.uid] = { name: userName, email: currentUser.email };
+            
             if (!uids.includes(currentUser.uid)) {
                 uids.push(currentUser.uid);
-                const details = groupData.collaboratorDetails || {};
-                const userName = currentUser.displayName || currentUser.email.split('@')[0];
-                details[currentUser.uid] = { name: userName, email: currentUser.email };
-                
-                await docRef.update({
-                    contributorUids: uids,
-                    collaboratorDetails: details
-                });
             }
+            
+            await docRef.update({
+                contributorUids: uids,
+                collaboratorDetails: details
+            });
             
             curGrp = sharedGroupId;
             document.getElementById('group-title').innerText = groupData.name || 'Shared Group';
@@ -1549,22 +1814,50 @@ function renderUsersTab() {
         const info = details[uid] || { email: 'Unknown' };
         const displayName = nameAssignments[uid];
         const isMe = uid === currentUser.uid;
+        const amIAdmin = currentUser.uid === currentGroupData.userId;
         const isAdmin = uid === currentGroupData.userId;
         
         let badges = '';
         if (isAdmin) badges += '<span style="background:rgba(245,158,11,0.2); color:#f59e0b; font-size:0.65rem; padding:2px 6px; border-radius:4px; margin-left:8px;">Admin</span>';
         if (isMe) badges += '<span style="background:rgba(99,102,241,0.2); color:#818cf8; font-size:0.65rem; padding:2px 6px; border-radius:4px; margin-left:8px;">You</span>';
         
+        let actionButtons = '';
+        
+        // Fix 2: Host kick/remove member
+        if (amIAdmin && !isMe) {
+            actionButtons += `<button class="kick-member-btn" title="Remove from group" onclick="kickCollaborator('${uid}', '${displayName.replace(/'/g, "\\'")}')"><i data-lucide="user-minus" style="width:16px;height:16px;"></i></button>`;
+        }
+        
+        // Feature 3: Payment reminder
+        if (!isMe && window._lastBalances) {
+            // Find which member this user is associated with
+            const assoc = currentGroupData.memberAssociations || {};
+            const memberName = Object.entries(assoc).find(([m, u]) => u === uid)?.[0];
+            const myName = Object.entries(assoc).find(([m, u]) => u === currentUser.uid)?.[0];
+            
+            if (memberName && myName) {
+                // Determine if this user owes ME specifically by looking at optimized debts
+                const owesMe = (window._lastOptimized || []).find(t => t.from === memberName && t.to === myName);
+                if (owesMe) {
+                    actionButtons += `<button class="remind-btn" id="remind-${uid}" onclick="sendPaymentReminder('${uid}', '${displayName.replace(/'/g, "\\'")}', '${info.email}', ${owesMe.amount}, '${myName.replace(/'/g, "\\'")}')">Remind</button>`;
+                }
+            }
+        }
+        
         return `<div class="list-item">
-            <div style="display:flex; align-items:center; gap:12px;">
+            <div style="display:flex; align-items:center; gap:12px; flex:1;">
                 <div class="avatar-circle" style="width:36px; height:36px; font-size:1rem;">${displayName.charAt(0).toUpperCase()}</div>
                 <div>
                     <strong>${displayName}</strong>${badges}<br>
                     <small style="color:var(--text-dim)">${info.email}</small>
                 </div>
             </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                ${actionButtons}
+            </div>
         </div>`;
     }).join("");
+    if (window.lucide) lucide.createIcons();
 }
 
 // Run shared group handler after load
@@ -1613,11 +1906,64 @@ function openUnequalSplitModal() {
 
 function updateUnequalRemaining() {
     const amount = parseFloat(document.getElementById('ex-amt').value) || 0;
+    const inputs = Array.from(document.querySelectorAll('.unequal-input'));
+    
+    // Check for user-edited inputs vs auto-filled
+    // Wait, simpler approach: just find empty inputs
     let entered = 0;
-    document.querySelectorAll('.unequal-input').forEach(input => {
-        entered += parseFloat(input.value) || 0;
+    let emptyInputs = [];
+    
+    inputs.forEach(input => {
+        // If it was auto-filled previously but now we're recalculating, we might want to clear it if others changed?
+        // Let's just calculate based on what's explicitly typed. If it has a value, count it.
+        const val = parseFloat(input.value);
+        if (isNaN(val)) {
+            emptyInputs.push(input);
+        } else {
+            entered += val;
+        }
     });
-    const remaining = Math.round((amount - entered) * 100) / 100;
+    
+    let remaining = Math.round((amount - entered) * 100) / 100;
+    
+    // Fix 8: Autofill last member
+    if (emptyInputs.length === 1 && remaining > 0) {
+        // Auto-fill the last remaining input visually, but add a class to track it
+        const lastInput = emptyInputs[0];
+        lastInput.value = remaining.toFixed(2);
+        lastInput.classList.add('auto-filled');
+        // Recalculate remaining as 0
+        entered += remaining;
+        remaining = 0;
+    } else {
+        // If there are multiple empty, or we exceeded, clear any previously auto-filled
+        inputs.forEach(input => {
+            if (input.classList.contains('auto-filled')) {
+                // If the user hasn't modified it, clear it
+                // Actually, if we trigger input, it removes the class
+                input.value = '';
+                input.classList.remove('auto-filled');
+            }
+        });
+        
+        // Recalculate properly after clearing
+        entered = 0;
+        inputs.forEach(input => {
+            const val = parseFloat(input.value);
+            if (!isNaN(val)) entered += val;
+        });
+        remaining = Math.round((amount - entered) * 100) / 100;
+        
+        // Try autofill one more time in case clearing an autofill left 1 empty again
+        emptyInputs = inputs.filter(input => isNaN(parseFloat(input.value)));
+        if (emptyInputs.length === 1 && remaining > 0) {
+            emptyInputs[0].value = remaining.toFixed(2);
+            emptyInputs[0].classList.add('auto-filled');
+            entered += remaining;
+            remaining = 0;
+        }
+    }
+
     const remEl = document.getElementById('unequal-remaining');
     const confirmBtn = document.getElementById('unequal-confirm');
     const warningEl = document.getElementById('unequal-warning');
@@ -1642,6 +1988,12 @@ function updateUnequalRemaining() {
         confirmBtn.style.opacity = '0.45';
     }
 }
+// Add event listener to clear auto-fill status on manual edit
+document.addEventListener('input', e => {
+    if (e.target.classList && e.target.classList.contains('unequal-input')) {
+        e.target.classList.remove('auto-filled');
+    }
+});
 
 function closeUnequalModal() {
     document.getElementById('unequal-modal').style.display = 'none';
@@ -1658,3 +2010,137 @@ function confirmUnequalSplit() {
     addEx();
 }
 
+// ========== FEATURE 2: KICK MEMBER ==========
+async function kickCollaborator(uid, displayName) {
+    if (!confirm(`Are you sure you want to kick ${displayName}? They will lose access to the group.`)) return;
+    try {
+        const docRef = db.collection('groups').doc(curGrp);
+        await db.runTransaction(async (t) => {
+            const doc = await t.get(docRef);
+            if (!doc.exists) return;
+            const data = doc.data();
+            const uids = data.contributorUids || [];
+            const details = data.collaboratorDetails || {};
+            
+            t.update(docRef, {
+                contributorUids: uids.filter(u => u !== uid),
+                collaboratorDetails: (delete details[uid], details)
+            });
+        });
+        notify(`Kicked ${displayName}`);
+        await refresh();
+    } catch (e) {
+        console.error("Kick error:", e);
+        notify("Could not kick member", "error");
+    }
+}
+
+// ========== FEATURE 3: PAYMENT REMINDER ==========
+let _lastRemindTime = 0;
+function sendPaymentReminder(uid, displayName, email, amount, myName) {
+    const now = Date.now();
+    if (now - _lastRemindTime < 30000) {
+        notify("Please wait 30 seconds before sending another reminder.", "error");
+        return;
+    }
+    
+    // Disable button temporarily to prevent spam clicks
+    const btn = document.getElementById(`remind-${uid}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Sent \u2713";
+        setTimeout(() => { btn.disabled = false; btn.textContent = "Remind"; }, 30000);
+    }
+    
+    _lastRemindTime = now;
+    
+    const groupName = document.getElementById('group-title').innerText;
+    const link = `${window.location.origin}?group=${curGrp}`;
+    
+    const subject = encodeURIComponent(`Payment Reminder: SmartSettled - ${groupName}`);
+    const body = encodeURIComponent(
+        `Hi ${displayName},\n\n` +
+        `This is a friendly reminder that you owe ₹${amount} to ${myName} in the group "${groupName}".\n\n` +
+        `You can view the details and settle up here:\n${link}\n\n` +
+        `Thanks,\n${myName} (via SmartSettled)`
+    );
+    
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+    notify("Opened email client");
+}
+
+// ========== FEATURE 1: MEMBER ASSOCIATION ==========
+async function toggleMemberAssociation(memberName, checked) {
+    try {
+        const docRef = db.collection('groups').doc(curGrp);
+        const doc = await docRef.get();
+        if (!doc.exists) return;
+        
+        let assoc = doc.data().memberAssociations || {};
+        
+        if (checked) {
+            // Un-associate from any other member first
+            for (const [m, u] of Object.entries(assoc)) {
+                if (u === currentUser.uid) delete assoc[m];
+            }
+            assoc[memberName] = currentUser.uid;
+        } else {
+            delete assoc[memberName];
+        }
+        
+        await docRef.update({ memberAssociations: assoc });
+        
+        // Update local reference and UI instantly
+        const grp = window.allUserGroups?.find(g => g.id === curGrp);
+        if (grp) grp.memberAssociations = assoc;
+        window._currentAssociations = assoc;
+        
+        await loadPpl(); // Re-render members to update checkboxes
+        computeStatus(); // Re-render dashboard summary
+        
+        notify(checked ? `Claimed member: ${memberName}` : `Unclaimed member: ${memberName}`);
+    } catch (e) {
+        console.error("Association error:", e);
+        notify("Could not update association", "error");
+    }
+}
+
+// ========== FEATURE 4: BUG REPORT ==========
+function openBugReport() {
+    document.getElementById('bug-title').value = '';
+    document.getElementById('bug-desc').value = '';
+    document.getElementById('bug-error').style.display = 'none';
+    document.getElementById('bug-report-modal').style.display = 'flex';
+}
+
+function closeBugReport() {
+    document.getElementById('bug-report-modal').style.display = 'none';
+}
+
+function submitBugReport() {
+    const title = document.getElementById('bug-title').value.trim();
+    const desc = document.getElementById('bug-desc').value.trim();
+    const errEl = document.getElementById('bug-error');
+    
+    if (!title || !desc) {
+        errEl.textContent = "Please fill out both title and description.";
+        errEl.style.display = 'block';
+        return;
+    }
+    
+    const contextInfo = `Group ID: ${curGrp || 'None'}\n` +
+                        `User ID: ${currentUser ? currentUser.uid : 'Guest'}\n` +
+                        `Is Guest Mode: ${isGuestMode}\n` +
+                        `User Agent: ${navigator.userAgent}`;
+                        
+    const subject = encodeURIComponent(`SmartSettled Bug: ${title}`);
+    const body = encodeURIComponent(`Bug Description:\n${desc}\n\n\n--- Debug Info ---\n${contextInfo}`);
+    
+    // Multiple recipients separated by comma
+    const recipients = "harshitrawat3125@gmail.com,rawatharshit3424@gmail.com";
+    
+    window.location.href = `mailto:${recipients}?subject=${subject}&body=${body}`;
+    
+    closeBugReport();
+    notify("Bug report opened in your email client");
+}
