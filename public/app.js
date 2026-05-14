@@ -114,6 +114,24 @@ function changeUsername() {
                     });
                 });
                 await batch.commit();
+                
+                // Cascade update the actual Member, Expenses, and Settlements in each group
+                for (const doc of snap.docs) {
+                    const data = doc.data();
+                    const assoc = data.memberAssociations || {};
+                    // Find memberId claimed by this user
+                    const memberId = Object.keys(assoc).find(mId => assoc[mId] === uid);
+                    if (memberId) {
+                        const mSnap = await db.collection('members').doc(memberId).get();
+                        if (mSnap.exists) {
+                            const oldName = mSnap.data().name;
+                            if (oldName !== newName.trim()) {
+                                // Cascade rename inside this group
+                                await syncMemberNameGlobally(doc.id, oldName, newName.trim());
+                            }
+                        }
+                    }
+                }
             } catch (e) { console.error('Failed to sync username to groups:', e); }
 
             notify("Username updated!");
@@ -627,8 +645,27 @@ async function hubCreateGroup() {
     const uid = currentUser.uid;
     const userName = currentUser.displayName || currentUser.email.split('@')[0];
     const userEmail = currentUser.email;
-    await db.collection('groups').add({ name, userId: uid, contributorUids: [uid], collaboratorDetails: { [uid]: { name: userName, email: userEmail } }, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    
+    // Create group
+    const newGroupRef = await db.collection('groups').add({ 
+        name, 
+        userId: uid, 
+        contributorUids: [uid], 
+        collaboratorDetails: { [uid]: { name: userName, email: userEmail } }, 
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() 
+    });
+    
+    // Auto-create and assign member
+    const newMemberRef = await db.collection('members').add({ 
+        name: userName, 
+        groupId: newGroupRef.id, 
+        userId: uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await newGroupRef.update({ memberAssociations: { [newMemberRef.id]: uid } });
+    
     el.value = '';
+    logAnalyticsEvent('group_created');
     await loadGrpsForHub();
     notify('Group created!');
 }
@@ -806,31 +843,23 @@ async function loadPpl() {
             const checkboxDisabled = isTaken ? 'disabled' : '';
             const checkboxChecked = isMyAssoc ? 'checked' : '';
             
-            // Show associated user's displayName if available
+            // Removed visual override and silent sync loop
             let displayName = p;
-            if (assocUid && currentGroupData?.collaboratorDetails?.[assocUid]) {
-                const googleName = currentGroupData.collaboratorDetails[assocUid].name;
-                if (googleName && googleName !== p && !isGuestMode) {
-                    displayName = googleName; // Visually update immediately
-                    if (!window._syncingNames) window._syncingNames = new Set();
-                    if (!window._syncingNames.has(p)) {
-                        window._syncingNames.add(p);
-                        syncMemberNameSilent(p, googleName).then(() => window._syncingNames.delete(p));
-                    }
-                }
-            }
             
             const assocCheckbox = !isGuestMode ? `<label class="assoc-checkbox-label" title="${isTaken ? 'Claimed by another user' : 'Associate yourself with this member'}">
                 <input type="checkbox" class="assoc-checkbox" data-memberid="${safeId}" ${checkboxChecked} ${checkboxDisabled} onchange="toggleMemberAssociation('${safeId}', this.checked)">
             </label>` : '';
             
+            // Feature: Hide pencil if claimed by someone else, keep for unassociated or self
+            const pencilBtn = !isTaken ? `<button class="edit-member-btn" title="Edit name" onclick="editMemberName('${safeName}')">
+                        <i data-lucide="pencil" style="width:16px;height:16px;color:var(--text-main);"></i>
+                    </button>` : '';
+            
             return `<div class="list-item member-item">
                 ${assocCheckbox}
                 <span class="member-name" style="flex:1">${displayName}${assocUid ? ' <span style="font-size:0.65rem;color:var(--primary-light);">\u2713</span>' : ''}</span>
                 <div style="display:flex; gap:10px;">
-                    <button class="edit-member-btn" title="Edit name" onclick="editMemberName('${safeName}')">
-                        <i data-lucide="pencil" style="width:16px;height:16px;color:var(--text-main);"></i>
-                    </button>
+                    ${pencilBtn}
                     <button class="edit-member-btn remove-member-btn" title="Remove member" onclick="removeMember('${safeName}')">
                         <i data-lucide="trash-2" style="width:16px;height:16px;"></i>
                     </button>
@@ -857,8 +886,8 @@ async function addMem() {
     if (!curGrp) { notify("Please create or select a group first.", "error"); return; }
     if (!name) { notify("Please enter a member name.", "error"); return; }
     
-    // Feature: Prevent duplicate member names
-    if (people.includes(name)) {
+    // Feature: Prevent duplicate member names (Case insensitive)
+    if (people.map(p => p.toLowerCase()).includes(name.toLowerCase())) {
         notify("Member name already exists. Please choose a different name.", "error");
         return;
     }
@@ -900,14 +929,13 @@ async function editMemberName(oldName) {
         });
     } else {
         const batch = db.batch();
-        const uid = currentUser.uid;
         
         // 1. Members
-        const memSnap = await db.collection('members').where('userId','==',uid).where('groupId','==',curGrp).where('name','==',oldName).get();
+        const memSnap = await db.collection('members').where('groupId','==',curGrp).where('name','==',oldName).get();
         memSnap.forEach(doc => batch.update(doc.ref, { name: finalName }));
         
         // 2. Expenses
-        const exSnap = await db.collection('expenses').where('userId','==',uid).where('groupId','==',curGrp).get();
+        const exSnap = await db.collection('expenses').where('groupId','==',curGrp).get();
         exSnap.forEach(doc => {
             const data = doc.data();
             let changed = false;
@@ -921,7 +949,7 @@ async function editMemberName(oldName) {
         });
         
         // 3. Settlements
-        const setSnap = await db.collection('settlements').where('userId','==',uid).where('groupId','==',curGrp).get();
+        const setSnap = await db.collection('settlements').where('groupId','==',curGrp).get();
         setSnap.forEach(doc => {
             const data = doc.data();
             let changed = false;
@@ -936,17 +964,16 @@ async function editMemberName(oldName) {
     await refresh();
 }
 
-async function syncMemberNameSilent(oldName, finalName) {
+async function syncMemberNameGlobally(groupId, oldName, finalName) {
     if (!finalName || finalName.trim() === "" || finalName === oldName) return;
-    if (people.includes(finalName)) return; // Avoid collapsing into existing
     try {
         const batch = db.batch();
-        const uid = currentUser.uid;
         
-        const memSnap = await db.collection('members').where('userId','==',uid).where('groupId','==',curGrp).where('name','==',oldName).get();
+        const memSnap = await db.collection('members').where('groupId','==',groupId).where('name','==',oldName).get();
+        if (memSnap.empty) return; // Member might not exist with oldName anymore
         memSnap.forEach(doc => batch.update(doc.ref, { name: finalName }));
         
-        const exSnap = await db.collection('expenses').where('userId','==',uid).where('groupId','==',curGrp).get();
+        const exSnap = await db.collection('expenses').where('groupId','==',groupId).get();
         exSnap.forEach(doc => {
             const data = doc.data();
             let changed = false;
@@ -959,7 +986,7 @@ async function syncMemberNameSilent(oldName, finalName) {
             if (changed) batch.update(doc.ref, updateData);
         });
         
-        const setSnap = await db.collection('settlements').where('userId','==',uid).where('groupId','==',curGrp).get();
+        const setSnap = await db.collection('settlements').where('groupId','==',groupId).get();
         setSnap.forEach(doc => {
             const data = doc.data();
             let changed = false;
@@ -969,7 +996,7 @@ async function syncMemberNameSilent(oldName, finalName) {
             if (changed) batch.update(doc.ref, updateData);
         });
         await batch.commit();
-    } catch(e) { console.warn("Silent sync failed", e); }
+    } catch(e) { console.warn("Global sync failed for group", groupId, e); }
 }
 
 async function removeMember(name) {
@@ -1399,10 +1426,10 @@ function computeStatus() {
     if (window.lucide) lucide.createIcons();
     if (document.getElementById('graph-view').classList.contains('active')) renderGraph(optimized);
     if (document.getElementById('analytics').classList.contains('active')) renderCharts(balances, spendingPerMember);
-    renderUsersTab();
     window._lastBalances = balances;
     window._lastOptimized = optimized;
     window._lastSpending = spendingPerMember;
+    renderUsersTab();
 }
 
 // --- Graph ---
