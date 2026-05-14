@@ -114,24 +114,6 @@ function changeUsername() {
                     });
                 });
                 await batch.commit();
-                
-                // Cascade update the actual Member, Expenses, and Settlements in each group
-                for (const doc of snap.docs) {
-                    const data = doc.data();
-                    const assoc = data.memberAssociations || {};
-                    // Find memberId claimed by this user
-                    const memberId = Object.keys(assoc).find(mId => assoc[mId] === uid);
-                    if (memberId) {
-                        const mSnap = await db.collection('members').doc(memberId).get();
-                        if (mSnap.exists) {
-                            const oldName = mSnap.data().name;
-                            if (oldName !== newName.trim()) {
-                                // Cascade rename inside this group
-                                await syncMemberNameGlobally(doc.id, oldName, newName.trim());
-                            }
-                        }
-                    }
-                }
             } catch (e) { console.error('Failed to sync username to groups:', e); }
 
             notify("Username updated!");
@@ -300,6 +282,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 radial-gradient(circle at ${x}px ${y}px, 
                 rgba(99,102,241,0.15), 
                 transparent 40%)
+            `;
+        });
+    }
+
+    const hubScreen = document.getElementById("group-hub-screen");
+    if (hubScreen) {
+        hubScreen.addEventListener("mousemove", (e) => {
+            const x = e.clientX;
+            const y = e.clientY;
+
+            hubScreen.style.background = `
+                radial-gradient(circle at ${x}px ${y}px, 
+                rgba(99,102,241,0.15), 
+                var(--bg-dark) 40%)
             `;
         });
     }
@@ -703,7 +699,7 @@ async function addGrp() {
     const userName = currentUser.displayName || currentUser.email.split('@')[0];
     const userEmail = currentUser.email;
 
-    await db.collection('groups').add({ 
+    const newGroupRef = await db.collection('groups').add({ 
         name, 
         userId: uid, 
         contributorUids: [uid],
@@ -712,6 +708,16 @@ async function addGrp() {
         },
         createdAt: firebase.firestore.FieldValue.serverTimestamp() 
     });
+    
+    // Auto-create and assign member
+    const newMemberRef = await db.collection('members').add({ 
+        name: userName, 
+        groupId: newGroupRef.id, 
+        userId: uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await newGroupRef.update({ memberAssociations: { [newMemberRef.id]: uid } });
+    
     el.value = "";
     await loadGrps();
 }
@@ -819,6 +825,7 @@ async function loadPpl() {
     } else {
         const snap = await db.collection('members').where('groupId', '==', curGrp).get();
         people = [];
+        window._memberData = []; // Fix: Clear before adding to prevent duplicates on concurrent calls
         snap.forEach(doc => {
             people.push(doc.data().name);
             window._memberData.push({ id: doc.id, name: doc.data().name });
@@ -1039,7 +1046,6 @@ async function loadEx() {
         snap.forEach(doc => expensesList.push({ id: doc.id, ...doc.data() }));
         expensesList.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     }
-    renderExpenseList(expensesList);
 }
 
 // --- Determine logged-in user's member name in current group ---
@@ -1429,7 +1435,10 @@ function computeStatus() {
     window._lastBalances = balances;
     window._lastOptimized = optimized;
     window._lastSpending = spendingPerMember;
+    
+    // Render dependent UI components now that state is fully computed
     renderUsersTab();
+    renderExpenseList(expensesList);
 }
 
 // --- Graph ---
@@ -1818,7 +1827,11 @@ async function processGroupJoin(sharedGroupId) {
             const details = groupData.collaboratorDetails || {};
             details[currentUser.uid] = { name: userName, email: currentUser.email };
             
+            let newlyJoined = false;
+            let currentAssoc = groupData.memberAssociations || {};
+            
             if (!uids.includes(currentUser.uid)) {
+                newlyJoined = true;
                 uids.push(currentUser.uid);
                 
                 // Feature: Auto-create member on join
@@ -1828,17 +1841,14 @@ async function processGroupJoin(sharedGroupId) {
                         name: userName,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
-                    // Auto-associate the new member
-                    const docToUpdate = await docRef.get();
-                    let currentAssoc = docToUpdate.data().memberAssociations || {};
                     currentAssoc[newMemberRef.id] = currentUser.uid;
-                    await docRef.update({ memberAssociations: currentAssoc });
                 } catch(e) { console.warn("Auto-member creation failed", e); }
             }
             
             await docRef.update({
                 contributorUids: uids,
-                collaboratorDetails: details
+                collaboratorDetails: details,
+                memberAssociations: currentAssoc
             });
             
             curGrp = sharedGroupId;
@@ -1850,7 +1860,11 @@ async function processGroupJoin(sharedGroupId) {
             }
 
             await loadGrps(); // reload list
-            notify(`Joined group: ${groupData.name || 'Shared Group'}`);
+            if (newlyJoined) {
+                notify(`Joined group: ${groupData.name || 'Shared Group'}`);
+            } else {
+                notify(`Opened group: ${groupData.name || 'Shared Group'}`);
+            }
         } else {
             notify("Shared group not found. Invalid ID or Link.", "error");
         }
@@ -1948,20 +1962,34 @@ function renderUsersTab() {
             actionButtons += `<button class="kick-member-btn" title="Remove from group" onclick="kickCollaborator('${uid}', '${displayName.replace(/'/g, "\\'")}')"><i data-lucide="user-minus" style="width:16px;height:16px;"></i></button>`;
         }
         
-        // Feature 3: Payment reminder
-        if (!isMe && window._lastBalances) {
-            const assoc = currentGroupData.memberAssociations || {};
-            const memberId = Object.entries(assoc).find(([mId, u]) => u === uid)?.[0];
-            const memberName = window._memberData?.find(m => m.id === memberId)?.name;
-            
-            if (memberName) {
-                // If this user has a negative balance overall, they owe the group
-                const userBalance = window._lastBalances[memberName];
-                if (userBalance !== undefined && userBalance < -0.01) {
-                    const absAmount = Math.abs(userBalance).toFixed(2);
-                    actionButtons += `<button class="btn btn-sm remind-btn" id="remind-${uid}" onclick="sendPaymentReminder('${uid}', '${displayName.replace(/'/g, "\\'")}', '${info.email}', ${absAmount})" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); padding:4px 8px; font-size:0.75rem;"><i data-lucide="bell" style="width:12px;height:12px;margin-right:4px;"></i>Remind</button>`;
+        // Feature 3: Payment/Email Action
+        if (!isMe) {
+            let btnText = "Email";
+            let btnIcon = "mail";
+            let amountStr = "0";
+            let btnColor = "var(--text-main)";
+            let btnBg = "rgba(255,255,255,0.05)";
+            let btnBorder = "rgba(255,255,255,0.1)";
+
+            if (window._lastBalances) {
+                const assoc = currentGroupData.memberAssociations || {};
+                const memberId = Object.entries(assoc).find(([mId, u]) => u === uid)?.[0];
+                const memberName = window._memberData?.find(m => m.id === memberId)?.name;
+                
+                if (memberName) {
+                    const userBalance = window._lastBalances[memberName];
+                    if (userBalance !== undefined && userBalance < -0.01) {
+                        amountStr = Math.abs(userBalance).toFixed(2);
+                        btnText = "Remind";
+                        btnIcon = "bell";
+                        btnColor = "#f59e0b";
+                        btnBg = "rgba(245,158,11,0.15)";
+                        btnBorder = "rgba(245,158,11,0.3)";
+                    }
                 }
             }
+            
+            actionButtons += `<button class="btn btn-sm remind-btn" id="remind-${uid}" onclick="sendPaymentReminder('${uid}', '${displayName.replace(/'/g, "\\'")}', '${info.email}', ${amountStr})" style="background:${btnBg}; color:${btnColor}; border:1px solid ${btnBorder}; padding:4px 8px; font-size:0.75rem;"><i data-lucide="${btnIcon}" style="width:12px;height:12px;margin-right:4px;"></i>${btnText}</button>`;
         }
         
         return `<div class="list-item">
@@ -2166,11 +2194,17 @@ function sendPaymentReminder(uid, displayName, email, amount) {
     
     // Disable button temporarily to prevent spam clicks
     const btn = document.getElementById(`remind-${uid}`);
+    let isRemind = amount > 0;
+    
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = "<i data-lucide='check' style='width:12px;height:12px;margin-right:4px;'></i>Sent";
+        btn.innerHTML = `<i data-lucide='check' style='width:12px;height:12px;margin-right:4px;'></i>Sent`;
         lucide.createIcons();
-        setTimeout(() => { btn.disabled = false; btn.innerHTML = "<i data-lucide='bell' style='width:12px;height:12px;margin-right:4px;'></i>Remind"; lucide.createIcons(); }, 30000);
+        setTimeout(() => { 
+            btn.disabled = false; 
+            btn.innerHTML = `<i data-lucide='${isRemind ? "bell" : "mail"}' style='width:12px;height:12px;margin-right:4px;'></i>${isRemind ? "Remind" : "Email"}`; 
+            lucide.createIcons(); 
+        }, 30000);
     }
     
     _lastRemindTime = now;
@@ -2178,13 +2212,24 @@ function sendPaymentReminder(uid, displayName, email, amount) {
     const groupName = document.getElementById('group-title').innerText;
     const link = `${window.location.origin}?group=${curGrp}`;
     
-    const subject = encodeURIComponent(`Payment Reminder: SmartSettled - ${groupName}`);
-    const body = encodeURIComponent(
-        `Hi ${displayName},\n\n` +
-        `This is a friendly reminder that you have an outstanding balance of ₹${amount} in the group "${groupName}".\n\n` +
-        `You can view the details and settle up here:\n${link}\n\n` +
-        `Thanks,\nSmartSettled`
-    );
+    let subject, body;
+    
+    if (isRemind) {
+        subject = encodeURIComponent(`Payment Reminder: SmartSettled - ${groupName}`);
+        body = encodeURIComponent(
+            `Hi ${displayName},\n\n` +
+            `This is a friendly reminder that you have an outstanding balance of ₹${amount} in the group "${groupName}".\n\n` +
+            `You can view the details and settle up here:\n${link}\n\n` +
+            `Thanks,\nSmartSettled`
+        );
+    } else {
+        subject = encodeURIComponent(`Message from SmartSettled: ${groupName}`);
+        body = encodeURIComponent(
+            `Hi ${displayName},\n\n\n` +
+            `Group Link:\n${link}\n\n` +
+            `Thanks,\nSmartSettled`
+        );
+    }
     
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
     notify("Opened email client");
@@ -2285,27 +2330,16 @@ async function submitBugReport() {
 }
 
 function submitBugReportEmail() {
-    const title = document.getElementById('bug-title').value.trim();
-    const desc = document.getElementById('bug-desc').value.trim();
-    const errEl = document.getElementById('bug-error');
-    
-    if (!title || !desc) {
-        errEl.textContent = "Please fill out both title and description.";
-        errEl.style.display = 'block';
-        return;
-    }
-    
     const contextInfo = `Group ID: ${curGrp || 'None'}\n` +
                         `User ID: ${currentUser ? currentUser.uid : 'Guest'}\n` +
                         `Is Guest Mode: ${isGuestMode}\n` +
                         `User Agent: ${navigator.userAgent}`;
                         
-    const subject = encodeURIComponent(`SmartSettled Bug: ${title}`);
-    const body = encodeURIComponent(`Bug Description:\n${desc}\n\n\n--- Debug Info ---\n${contextInfo}`);
+    const subject = encodeURIComponent(`SmartSettled Support / Bug Report`);
+    const body = encodeURIComponent(`Please describe your issue here:\n\n\n\n--- Debug Info ---\n${contextInfo}`);
     const recipients = "harshitrawat3125@gmail.com,rawatharshit3424@gmail.com";
     
     window.location.href = `mailto:${recipients}?subject=${subject}&body=${body}`;
-    closeBugReport();
     notify("Opened your email client");
 }
 
